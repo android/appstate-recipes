@@ -18,13 +18,11 @@ package com.example.appstaterecipes.sample
 
 import android.os.SystemClock
 import androidx.appstate.transform.transform
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -42,35 +40,29 @@ enum class SensorSource {
 
 // [START sample_stable_state]
 @Stable
-interface SampleUiState {
-    val raw: Acceleration
-    val rawHz: Int
-    val sampled250ms: Acceleration
-    val sampled500ms: Acceleration
-    val sampled1000ms: Acceleration
-    val isHardwareSensorAvailable: Boolean
-    val activeSource: SensorSource
-}
-
-@Immutable
-data class ImmutableSampleUiState(
-    override val raw: Acceleration = Acceleration(),
-    override val rawHz: Int = 0,
-    override val sampled250ms: Acceleration = Acceleration(),
-    override val sampled500ms: Acceleration = Acceleration(),
-    override val sampled1000ms: Acceleration = Acceleration(),
-    override val isHardwareSensorAvailable: Boolean = true,
-    override val activeSource: SensorSource = SensorSource.HARDWARE,
-) : SampleUiState
-
-internal class DelegatedSampleUiState : SampleUiState {
-    override var raw by mutableStateOf(Acceleration())
-    override var rawHz by mutableIntStateOf(0)
-    override var sampled250ms by mutableStateOf(Acceleration())
-    override var sampled500ms by mutableStateOf(Acceleration())
-    override var sampled1000ms by mutableStateOf(Acceleration())
-    override var isHardwareSensorAvailable by mutableStateOf(true)
-    override var activeSource by mutableStateOf(SensorSource.HARDWARE)
+class SampleUiState(
+    raw: Acceleration = Acceleration(),
+    rawHz: Int = 0,
+    sampled250ms: Acceleration = Acceleration(),
+    sampled500ms: Acceleration = Acceleration(),
+    sampled1000ms: Acceleration = Acceleration(),
+    isHardwareSensorAvailable: Boolean = true,
+    activeSource: SensorSource = SensorSource.HARDWARE,
+) {
+    var raw by mutableStateOf(raw)
+        internal set
+    var rawHz by mutableIntStateOf(rawHz)
+        internal set
+    var sampled250ms by mutableStateOf(sampled250ms)
+        internal set
+    var sampled500ms by mutableStateOf(sampled500ms)
+        internal set
+    var sampled1000ms by mutableStateOf(sampled1000ms)
+        internal set
+    var isHardwareSensorAvailable by mutableStateOf(isHardwareSensorAvailable)
+        internal set
+    var activeSource by mutableStateOf(activeSource)
+        internal set
 }
 // [END sample_stable_state]
 
@@ -156,14 +148,13 @@ class SampleViewModel(
 
     // [START sample_transform_usage]
     val uiState: State<SampleUiState> = transform(
-        initialValue = ImmutableSampleUiState(),
+        initialValue = SampleUiState(),
         scope = viewModelScope,
-    ) {
+    ) { state ->
         val sampled250ms by rememberSampled(rawAcceleration, periodMillis = 250L)
         val sampled500ms by rememberSampled(rawAcceleration, periodMillis = 500L)
         val sampled1000ms by rememberSampled(rawAcceleration, periodMillis = 1000L)
 
-        val state = remember { DelegatedSampleUiState() }
         state.raw = rawAcceleration
         state.rawHz = rawHz
         state.sampled250ms = sampled250ms

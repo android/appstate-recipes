@@ -348,7 +348,7 @@ private fun CoordinateText(
 @Preview(showBackground = true)
 @Composable
 private fun SampleScreenPreview() {
-    val sampleState = ImmutableSampleUiState(
+    val sampleState = SampleUiState(
         raw = Acceleration(x = 3.4f, y = -6.1f, z = 7.2f),
         sampled250ms = Acceleration(x = 2.8f, y = -5.4f, z = 7.8f),
         sampled500ms = Acceleration(x = 1.9f, y = -4.2f, z = 8.8f),
@@ -367,7 +367,7 @@ private fun SampleScreenPreview() {
 @Preview(showBackground = true)
 @Composable
 private fun SampleScreenSimulatedPreview() {
-    val sampleState = ImmutableSampleUiState(
+    val sampleState = SampleUiState(
         raw = Acceleration(x = -2.2f, y = 4.4f, z = 9.1f),
         sampled250ms = Acceleration(x = -1.8f, y = 3.6f, z = 9.3f),
         sampled500ms = Acceleration(x = -1.0f, y = 2.2f, z = 9.6f),

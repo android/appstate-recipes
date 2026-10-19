@@ -16,10 +16,12 @@
 
 package com.example.appstaterecipes.debounce
 
+import androidx.appstate.transform.testing.transformTest
+import androidx.appstate.transform.transform
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.example.appstaterecipes.runTransformTest
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -27,171 +29,225 @@ import org.junit.Test
 class DebounceTest {
 
     @Test
-    fun debounceEffect_invokesCallbackAfterTimeout() = runTransformTest {
+    fun debounceEffect_invokesCallbackAfterTimeout() = transformTest {
         var input by mutableStateOf("initial")
         val emissions = mutableListOf<String>()
 
-        testTransform(initialValue = Unit) {
+        transform(
+            initialValue = Unit,
+            scope = backgroundScope,
+            dispatcher = testDispatcher,
+        ) {
             DebounceEffect(input, timeoutMillis = 300L) { debounced ->
                 emissions.add(debounced)
             }
         }
+        advance()
 
-        advanceTimeBy(100)
+        advanceTimeBy(100.milliseconds)
+        advance()
         assertEquals(emptyList<String>(), emissions)
 
-        advanceTimeBy(200)
+        advanceTimeBy(200.milliseconds)
+        advance()
         assertEquals(listOf("initial"), emissions)
     }
 
     @Test
-    fun debounceEffect_rapidChangesResetTimer() = runTransformTest {
+    fun debounceEffect_rapidChangesResetTimer() = transformTest {
         var input by mutableStateOf("a")
         val emissions = mutableListOf<String>()
 
-        testTransform(initialValue = Unit) {
+        transform(
+            initialValue = Unit,
+            scope = backgroundScope,
+            dispatcher = testDispatcher,
+        ) {
             DebounceEffect(input, timeoutMillis = 300L) { debounced ->
                 emissions.add(debounced)
             }
         }
+        advance()
 
         // Change input before 300ms completes
-        advanceTimeBy(200)
+        advanceTimeBy(200.milliseconds)
+        advance()
         input = "ab"
-        sync()
+        advance()
 
         // Change again before another 300ms completes
-        advanceTimeBy(200)
+        advanceTimeBy(200.milliseconds)
+        advance()
         input = "abc"
-        sync()
+        advance()
 
         // 200ms after last change: still resetting
-        advanceTimeBy(200)
+        advanceTimeBy(200.milliseconds)
+        advance()
         assertEquals(emptyList<String>(), emissions)
 
         // Allow 300ms from the last change
-        advanceTimeBy(100)
+        advanceTimeBy(100.milliseconds)
+        advance()
         assertEquals(listOf("abc"), emissions)
     }
 
     @Test
-    fun rememberDebounced_projectsDebouncedState() = runTransformTest {
+    fun rememberDebounced_projectsDebouncedState() = transformTest {
         var input by mutableStateOf("start")
 
-        val debouncedState = testTransform(initialValue = "start") {
+        val debouncedState = transform(
+            initialValue = "start",
+            scope = backgroundScope,
+            dispatcher = testDispatcher,
+        ) {
             val debounced by rememberDebounced(input, timeoutMillis = 300L)
             debounced
         }
+        advance()
 
         assertEquals("start", debouncedState.value)
 
         input = "updated"
-        sync()
+        advance()
 
-        advanceTimeBy(150)
+        advanceTimeBy(150.milliseconds)
+        advance()
         assertEquals("start", debouncedState.value)
 
-        advanceTimeBy(150)
+        advanceTimeBy(150.milliseconds)
+        advance()
         assertEquals("updated", debouncedState.value)
     }
 
     @Test
-    fun rememberDebounced_structuralEqualityPreventsRedundantUpdates() = runTransformTest {
+    fun rememberDebounced_structuralEqualityPreventsRedundantUpdates() = transformTest {
         var input by mutableStateOf("A")
 
-        val debouncedState = testTransform(initialValue = "A") {
+        val debouncedState = transform(
+            initialValue = "A",
+            scope = backgroundScope,
+            dispatcher = testDispatcher,
+        ) {
             val debounced by rememberDebounced(input, timeoutMillis = 300L)
             debounced
         }
+        advance()
 
         var readerInvocations = 0
-        testTransform(initialValue = 0) {
-            val current = debouncedState.value
+        transform(
+            initialValue = Unit,
+            scope = backgroundScope,
+            dispatcher = testDispatcher,
+        ) {
+            debouncedState.value
             readerInvocations++
-            current.length
         }
+        advance()
 
         assertEquals(1, readerInvocations)
 
         // Change to B
         input = "B"
-        sync()
-        advanceTimeBy(300)
+        advance()
+        advanceTimeBy(300.milliseconds)
+        advance()
         assertEquals(2, readerInvocations)
 
         // Change back to A
         input = "A"
-        sync()
-        advanceTimeBy(300)
+        advance()
+        advanceTimeBy(300.milliseconds)
+        advance()
         assertEquals(3, readerInvocations)
 
         // Set state to "B" and quickly back to "A" before timeout:
         // Even if an update completes with "A" (equals previous value),
         // mutableStateOf(value) structural equality policy does not trigger observer recomposition
         input = "B"
-        sync()
-        advanceTimeBy(100)
+        advance()
+        advanceTimeBy(100.milliseconds)
+        advance()
         input = "A"
-        sync()
-        advanceTimeBy(300)
+        advance()
+        advanceTimeBy(300.milliseconds)
+        advance()
         assertEquals(3, readerInvocations)
     }
 
     @Test
-    fun debounceEffect_cancelsSuspendingCallbackMidFlight() = runTransformTest {
+    fun debounceEffect_cancelsSuspendingCallbackMidFlight() = transformTest {
         var input by mutableStateOf("first")
         var startedCallback = false
         var completedCallback = false
 
-        testTransform(initialValue = Unit) {
+        transform(
+            initialValue = Unit,
+            scope = backgroundScope,
+            dispatcher = testDispatcher,
+        ) {
             DebounceEffect(input, timeoutMillis = 300L) {
                 startedCallback = true
                 delay(200L)
                 completedCallback = true
             }
         }
+        advance()
 
         // Advance 300ms so DebounceEffect timeout completes and starts the callback
-        advanceTimeBy(300)
+        advanceTimeBy(300.milliseconds)
+        advance()
         assertEquals(true, startedCallback)
         assertEquals(false, completedCallback)
 
         // Input changes while callback is suspended in delay(200L)
         // LaunchedEffect(value, timeoutMillis) restarts, cancelling previous coroutine
         input = "second"
-        sync()
+        advance()
 
         // Advance enough time that the original callback would have finished if not cancelled
-        advanceTimeBy(250)
+        advanceTimeBy(250.milliseconds)
+        advance()
         assertEquals(false, completedCallback)
     }
 
     @Test
-    fun debounceEffect_rememberUpdatedStateSwapsLambdaWithoutResettingTimer() = runTransformTest {
+    fun debounceEffect_rememberUpdatedStateSwapsLambdaWithoutResettingTimer() = transformTest {
         var input by mutableStateOf("v")
         var callbackInvocation = 0
         var callbackToRun: (String) -> Unit by mutableStateOf({ callbackInvocation = 1 })
 
-        testTransform(initialValue = Unit) {
+        transform(
+            initialValue = Unit,
+            scope = backgroundScope,
+            dispatcher = testDispatcher,
+        ) {
             val currentCallback = callbackToRun
             DebounceEffect(input, timeoutMillis = 300L) {
                 currentCallback(it)
             }
         }
+        advance()
 
         // At 200ms, swap callback lambda without changing input or timeoutMillis
-        advanceTimeBy(200)
+        advanceTimeBy(200.milliseconds)
+        advance()
         callbackToRun = { callbackInvocation = 2 }
-        sync()
+        advance()
 
         // Timer should NOT have been reset by lambda change; should fire at 300ms total (+100ms)
-        advanceTimeBy(100)
+        advanceTimeBy(100.milliseconds)
+        advance()
         assertEquals(2, callbackInvocation)
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun debounceEffect_throwsOnNegativeTimeout() = runTransformTest {
-        testTransform(initialValue = Unit) {
+    fun debounceEffect_throwsOnNegativeTimeout() = transformTest {
+        transform(
+            initialValue = Unit,
+            scope = backgroundScope,
+            dispatcher = testDispatcher,
+        ) {
             DebounceEffect("start", timeoutMillis = -1L) {}
         }
     }
