@@ -32,9 +32,9 @@ viewModelScope.launch {
 ```kotlin
 // AppState / Compose State approach
 val uiState: State<SampleUiState> = transform(
-    initialValue = ImmutableSampleUiState(),
+    initialValue = SampleUiState(),
     scope = viewModelScope,
-) {
+) { state ->
     // Option 1 — State transformation (sampled streams with distinct cadences):
     val sampled250ms by rememberSampled(rawAcceleration, periodMillis = 250L)
     val sampled500ms by rememberSampled(rawAcceleration, periodMillis = 500L)
@@ -46,8 +46,7 @@ val uiState: State<SampleUiState> = transform(
     }
 
     // High-performance state projection:
-    // Retain a single stable holder across executions to provide fine-grained property reads
-    val state = remember { DelegatedSampleUiState() }
+    // Mutate the single stable holder passed across executions for fine-grained property reads
     state.raw = rawAcceleration
     state.rawHz = rawHz
     state.sampled250ms = sampled250ms
@@ -90,18 +89,33 @@ val uiState: State<SampleUiState> = transform(
 
 A common anti-pattern when working with high-frequency streams in Compose is returning a brand-new immutable `UiState` data class on every sensor event (60+ times/sec). Even if parts of the UI only care about a slower 1000ms sample, emitting a new top-level state object triggers recomposition of any composable reading `uiState`.
 
-Instead, this recipe demonstrates returning a single **`@Stable` state interface** from a **single `transform` block**:
+Instead, this recipe demonstrates returning a single **`@Stable` state class** backed by delegated snapshot properties from a **single `transform` block**:
 
 ```kotlin
 @Stable
-interface SampleUiState {
-    val raw: Acceleration
-    val rawHz: Int
-    val sampled250ms: Acceleration
-    val sampled500ms: Acceleration
-    val sampled1000ms: Acceleration
-    val isHardwareSensorAvailable: Boolean
-    val activeSource: SensorSource
+class SampleUiState(
+    raw: Acceleration = Acceleration(),
+    rawHz: Int = 0,
+    sampled250ms: Acceleration = Acceleration(),
+    sampled500ms: Acceleration = Acceleration(),
+    sampled1000ms: Acceleration = Acceleration(),
+    isHardwareSensorAvailable: Boolean = true,
+    activeSource: SensorSource = SensorSource.HARDWARE,
+) {
+    var raw by mutableStateOf(raw)
+        internal set
+    var rawHz by mutableIntStateOf(rawHz)
+        internal set
+    var sampled250ms by mutableStateOf(sampled250ms)
+        internal set
+    var sampled500ms by mutableStateOf(sampled500ms)
+        internal set
+    var sampled1000ms by mutableStateOf(sampled1000ms)
+        internal set
+    var isHardwareSensorAvailable by mutableStateOf(isHardwareSensorAvailable)
+        internal set
+    var activeSource by mutableStateOf(activeSource)
+        internal set
 }
 ```
 
@@ -110,7 +124,7 @@ interface SampleUiState {
 1. **Single Headless Composition**:
    All sampled rates (`250ms`, `500ms`, `1000ms`) live in the same `transform` composition rather than managing multiple parallel `transform` scopes.
 2. **Fine-Grained Snapshot Tracking**:
-   The returned `SampleUiState` instance is created once via `remember { DelegatedSampleUiState() }`. Each property on the class is backed by an independent `mutableStateOf`. When `raw` fluctuates at 60Hz, only observers that read `uiState.raw` are invalidated; observers of `sampled1000ms` or static screen controls remain unaffected.
+   The `SampleUiState` instance is created once as `initialValue = SampleUiState()` and passed into each `transform` execution via its `state` parameter. Each property on the class is backed by an independent `mutableStateOf`. When `raw` fluctuates at 60Hz, only observers that read `uiState.raw` are invalidated; observers of `sampled1000ms` or static screen controls remain unaffected.
 3. **Automatic Draw-Phase Optimization**:
    Because properties hook into individual Compose snapshot reads, passing `uiState` into a `Canvas` and reading `uiState.raw` inside the `Canvas` lambda allows Compose to completely skip Composition and Layout phases, re-executing only the Draw pass. (Note: Composables that observe `uiState.raw` during composition or layout, such as text labels, still recompose when the value changes.)
 

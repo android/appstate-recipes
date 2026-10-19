@@ -66,7 +66,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.appstate.transform)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    testImplementation(libs.androidx.appstate.transform.testing)
     testImplementation(libs.junit)
-    testImplementation(libs.kotlinx.coroutines.test)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
