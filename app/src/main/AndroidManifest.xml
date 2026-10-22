@@ -23,6 +23,13 @@
         android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS"
         tools:ignore="HighSamplingRate" />
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:enableOnBackInvokedCallback="true"
@@ -31,6 +38,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AppStateRecipes"
         tools:targetApi="33">
+
         <activity
             android:name=".RecipePickerActivity"
             android:exported="true">

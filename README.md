@@ -8,12 +8,15 @@ Recipes on the `main` branch use a pinned snapshot build, bumped regularly, of A
 These are the recipes and what they demonstrate.
 
 ### StateStore
-*Recipes coming soon.*
+- **[Browser Multi-Window Navigation](apps/browser)** (`:apps:browser`): A standalone multi-window and multi-tab browser application coordinating Navigation 3 back stacks across Activity windows via StateStore and DataStore persistence.
 
 ### Transform
 #### Rate limiting
 - **[Debounce](app/src/main/java/com/example/appstaterecipes/debounce)**: Demonstrates how to debounce rapidly changing state (such as search queries) using `DebounceEffect` and `rememberDebounced`.
 - **[Sample](app/src/main/java/com/example/appstaterecipes/sample)**: Demonstrates how to periodically sample high-frequency state streams (such as accelerometer sensor data) using `SampleEffect` and `rememberSampled`.
+
+### Full-app recipes
+Full-app recipes live under `apps/*` (such as `apps/browser/`). Each is an independent Android application module that can be launched directly via its own Android Studio Run Configuration (e.g. `apps.browser`) or deployed to a device and opened from the main Recipe Picker (`:app`). Shared architecture components (like `StateStoreOwner`, `StateStoreViewerActivity`, and common theming) are provided by the shared `:core` library module.
 
 ### Future recipes
 The most upvoted [recipe requests](https://github.com/android/appstate-recipes/issues?q=is%3Aissue%20state%3Aopen%20label%3Arecipe-request) will be considered for implementation. Don't see your recipe? [File a request for one here](https://github.com/android/appstate-recipes/issues/new?template=1-recipe-request.md).
