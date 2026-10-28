@@ -35,12 +35,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven {
-            url = uri("https://androidx.dev/snapshots/builds/16650541/artifacts/repository")
-            content {
-                includeGroup("androidx.appstate.transform")
-            }
-        }
     }
 }
 
