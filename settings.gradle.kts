@@ -36,7 +36,7 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven {
-            url = uri("https://androidx.dev/snapshots/builds/16650541/artifacts/repository")
+            url = uri("https://androidx.dev/snapshots/builds/16707163/artifacts/repository")
             content {
                 includeGroupByRegex("androidx\\.appstate.*")
                 includeGroupByRegex("androidx\\.datastore.*")

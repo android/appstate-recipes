@@ -191,15 +191,15 @@ private fun StateStoreSummaryCard(
         ) {
             SummaryMetric(
                 label = "Active Keys",
-                value = uiState.totalKeys.toString(),
+                value = uiState.totalKeyCount.toString(),
             )
             SummaryMetric(
                 label = "Persisted",
-                value = uiState.persistedKeysCount.toString(),
+                value = uiState.persistedKeyCount.toString(),
             )
             SummaryMetric(
                 label = "Auto-Clear",
-                value = uiState.autoClearKeysCount.toString(),
+                value = uiState.autoClearKeyCount.toString(),
             )
         }
     }
@@ -389,7 +389,7 @@ private fun StateStoreViewerScreenPopulatedPreview() {
                 entries = listOf(
                     StateStoreEntryUiState(
                         keyName = "WindowsKey",
-                        qualifiedKeyName = "com.example.appstaterecipes.browser.WindowsKey",
+                        qualifiedKeyName = "com.example.appstaterecipes.browser.state.WindowsKey",
                         valueTypeName = "LinkedHashMap",
                         isPersistedToDataStore = true,
                         autoClearKeyName = null,
@@ -402,8 +402,8 @@ private fun StateStoreViewerScreenPopulatedPreview() {
                         formattedDefaultValue = "{}",
                     ),
                     StateStoreEntryUiState(
-                        keyName = "TabStacksKey",
-                        qualifiedKeyName = "com.example.appstaterecipes.browser.TabStacksKey",
+                        keyName = "TabBackStacksKey",
+                        qualifiedKeyName = "com.example.appstaterecipes.browser.state.TabBackStacksKey",
                         valueTypeName = "LinkedHashMap",
                         isPersistedToDataStore = true,
                         autoClearKeyName = null,

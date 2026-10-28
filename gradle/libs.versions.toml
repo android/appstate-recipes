@@ -4,11 +4,12 @@ coreKtx = "1.19.1"
 junit = "4.13.2"
 lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
-kotlin = "2.4.20"
+kotlin = "2.4.21"
 composeBom = "2026.09.00"
 appstate = "1.0.0-SNAPSHOT"
 navigation3 = "1.2.0"
-navigationevent = "1.0.0"
+navigationevent = "1.2.0"
+windowCore = "1.5.1"
 compileSdk = "37"
 minSdk = "24"
 targetSdk = "37"
@@ -35,6 +36,7 @@ androidx-navigation3-runtime = { group = "androidx.navigation3", name = "navigat
 androidx-navigation3-ui = { group = "androidx.navigation3", name = "navigation3-ui", version.ref = "navigation3" }
 androidx-navigationevent = { module = "androidx.navigationevent:navigationevent", version.ref = "navigationevent" }
 androidx-navigationevent-compose = { module = "androidx.navigationevent:navigationevent-compose", version.ref = "navigationevent" }
+androidx-window-core = { group = "androidx.window", name = "window-core", version.ref = "windowCore" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

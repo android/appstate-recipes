@@ -49,7 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.appstaterecipes.browser.WindowSummary
+import com.example.appstaterecipes.browser.state.WindowSummary
 import com.example.appstaterecipes.ui.theme.AppStateRecipesTheme
 
 @Composable

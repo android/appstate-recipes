@@ -39,14 +39,14 @@ class StateStoreViewerTest {
         val viewerState = stateStore.observeViewerUiState()
 
         // Initially empty
-        assertEquals(0, viewerState.value.totalKeys)
+        assertEquals(0, viewerState.value.totalKeyCount)
         assertTrue(viewerState.value.entries.isEmpty())
 
         // Touch CounterKey with default value
         stateStore.getState(CounterKey)
-        assertEquals(1, viewerState.value.totalKeys)
-        assertEquals(1, viewerState.value.persistedKeysCount)
-        assertEquals(0, viewerState.value.autoClearKeysCount)
+        assertEquals(1, viewerState.value.totalKeyCount)
+        assertEquals(1, viewerState.value.persistedKeyCount)
+        assertEquals(0, viewerState.value.autoClearKeyCount)
 
         val initialCounterEntry = viewerState.value.entries.single()
         assertEquals("CounterKey", initialCounterEntry.keyName)
@@ -58,9 +58,9 @@ class StateStoreViewerTest {
         stateStore.setState(CounterKey, 42)
         stateStore.setState(EphemeralKey, listOf("alpha", "beta"))
 
-        assertEquals(2, viewerState.value.totalKeys)
-        assertEquals(1, viewerState.value.persistedKeysCount)
-        assertEquals(1, viewerState.value.autoClearKeysCount)
+        assertEquals(2, viewerState.value.totalKeyCount)
+        assertEquals(1, viewerState.value.persistedKeyCount)
+        assertEquals(1, viewerState.value.autoClearKeyCount)
 
         val entriesByName = viewerState.value.entries.associateBy { it.keyName }
         val updatedCounter = entriesByName.getValue("CounterKey")

@@ -14,44 +14,33 @@
  * limitations under the License.
  */
 
-package com.example.appstaterecipes.browser.ui
+package com.example.appstaterecipes.browser.ui.tabbar
 
-import android.os.Build
-import android.view.View
+import android.graphics.Picture
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.background
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.ui.graphics.vector.VectorPainter
-import androidx.compose.ui.text.TextMeasurer
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Window
-import androidx.compose.material3.Badge
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,10 +48,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -77,123 +67,29 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.mimeTypes
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.appstaterecipes.browser.BrowserRoute
-import com.example.appstaterecipes.browser.BrowserWindowUiState
-import com.example.appstaterecipes.browser.TabDragPayload
-import com.example.appstaterecipes.browser.TabSummary
-import com.example.appstaterecipes.browser.WindowSummary
+import com.example.appstaterecipes.browser.model.BrowserRoute
+import com.example.appstaterecipes.browser.state.BrowserWindowUiState
+import com.example.appstaterecipes.browser.state.TabSummary
+import com.example.appstaterecipes.browser.state.WindowSummary
+import com.example.appstaterecipes.browser.ui.TabActionsDropdownMenu
+import com.example.appstaterecipes.browser.ui.WindowSwitcherDropdownMenu
+import com.example.appstaterecipes.browser.ui.dragdrop.OffscreenTabDragShadowCapture
+import com.example.appstaterecipes.browser.ui.dragdrop.TabDragPayload
+import com.example.appstaterecipes.browser.ui.dragdrop.TabDragPreviewMode
+import com.example.appstaterecipes.browser.ui.dragdrop.TabDragShadowBuilder
+import com.example.appstaterecipes.browser.ui.dragdrop.TabDragShadowController
 import com.example.appstaterecipes.ui.theme.AppStateRecipesTheme
-import java.lang.ref.WeakReference
-import kotlin.math.ceil
-import kotlin.math.floor
 
-/**
- * Computes the target horizontal scroll offset (in pixels) needed to make the tab with
- * [tabBounds] fully visible within [rowBounds], or `null` if the tab is already fully visible.
- *
- * [rowBounds] and [tabBounds] must be in the same unclipped coordinate space (such as root
- * coordinates with `clipBounds = false`).
- */
-internal fun calculateAutoScrollOffsetToRevealTab(
-    currentScroll: Int,
-    maxScroll: Int,
-    rowBounds: Rect,
-    tabBounds: Rect,
-): Int? {
-    if (
-        rowBounds.width <= 0f ||
-        tabBounds.width <= 0f ||
-        maxScroll <= 0 ||
-        maxScroll == Int.MAX_VALUE
-    ) {
-        return null
-    }
-
-    val rawDelta = when {
-        tabBounds.left < rowBounds.left || tabBounds.width > rowBounds.width -> {
-            floor(tabBounds.left - rowBounds.left).toInt()
-        }
-        tabBounds.right > rowBounds.right -> {
-            ceil(tabBounds.right - rowBounds.right).toInt()
-        }
-        else -> return null
-    }
-
-    val targetScroll = (currentScroll + rawDelta).coerceIn(0, maxScroll)
-    return targetScroll.takeIf { it != currentScroll }
-}
-
-/**
- * Computes the target index to move [draggedTabId] to within [tabs] when the drag pointer is at
- * [dragX] (in the same coordinate space as [tabBounds]), or `null` if no neighbor tab's horizontal
- * midpoint has been crossed yet.
- */
-internal fun calculateReorderTargetIndex(
-    tabs: List<TabSummary>,
-    draggedTabId: String,
-    dragX: Float,
-    tabBounds: Map<String, Rect>,
-): Int? {
-    val fromIndex = tabs.indexOfFirst { it.tabId == draggedTabId }
-    if (fromIndex == -1 || tabs.size <= 1) return null
-    val draggedBounds = tabBounds[draggedTabId] ?: return null
-    val draggedCenter = draggedBounds.center.x
-
-    return if (dragX > draggedCenter) {
-        var targetIndex: Int? = null
-        for (i in (fromIndex + 1)..tabs.lastIndex) {
-            val bounds = tabBounds[tabs[i].tabId] ?: continue
-            if (dragX > bounds.center.x) {
-                targetIndex = i
-            } else {
-                break
-            }
-        }
-        targetIndex
-    } else if (dragX < draggedCenter) {
-        var targetIndex: Int? = null
-        for (i in (fromIndex - 1) downTo 0) {
-            val bounds = tabBounds[tabs[i].tabId] ?: continue
-            if (dragX < bounds.center.x) {
-                targetIndex = i
-            } else {
-                break
-            }
-        }
-        targetIndex
-    } else {
-        null
-    }
-}
-
-/**
- * Non-observable state container for tracking drag geometry, pointer coordinates,
- * and layout lock flags across drag-and-drop frames without triggering composable recompositions.
- */
-private class TabBarDragState {
-    var activeDragXInRoot: Float? = null
-    var tabRowBoundsInRoot: Rect? = null
-    val tabBoundsInRoot = mutableMapOf<String, Rect>()
-    var awaitingLayoutAfterReorder: Boolean = false
+private class ActiveDragShadowSession {
+    var builder: TabDragShadowBuilder? = null
+    var lastDraggedTab: TabSummary? = null
 }
 
 @Composable
@@ -208,9 +104,11 @@ fun BrowserTabBar(
     onSwitchWindow: (String) -> Unit,
     onOpenWindowInNewWindow: (String) -> Unit,
     onCloseWindow: (String) -> Unit,
-    onOpenStateStoreViewer: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onOpenStateStoreViewer: (() -> Unit)? = null,
+    windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
     onMoveTab: (tabId: String, toIndex: Int) -> Unit = { _, _ -> },
+    canDragToNewWindow: Boolean = uiState.canPopOut,
     closingTabBackProgress: () -> Float = { 0f },
 ) {
     val windowId = uiState.windowId
@@ -243,8 +141,8 @@ fun BrowserTabBar(
         }
     }
 
-    fun tryReorderAt(dragX: Float, ignoreLayoutLock: Boolean = false) {
-        if (!ignoreLayoutLock && dragState.awaitingLayoutAfterReorder) return
+    fun tryReorderAt(dragX: Float) {
+        if (dragState.awaitingLayoutAfterReorder) return
         if (TabDragShadowController.activeSourceWindowId != windowId) return
         val draggedTabId = TabDragShadowController.activeDraggedTabId ?: return
         val targetIndex = calculateReorderTargetIndex(
@@ -393,14 +291,64 @@ fun BrowserTabBar(
     ) {
         Column(
             modifier = Modifier
-                .windowInsetsPadding(WindowInsets.statusBars)
+                .windowInsetsPadding(windowInsets.only(WindowInsetsSides.Top))
                 .padding(top = 6.dp),
         ) {
+            val localView = LocalView.current
+            val dragPreviewPicture = remember { Picture() }
+            var preparedDragTabId by remember { mutableStateOf<String?>(null) }
+            val dragShadowSession = remember { ActiveDragShadowSession() }
+
+            val isActiveDragSource = TabDragShadowController.activeSourceWindowId == windowId
+            val activeDraggedTabId = if (isActiveDragSource) {
+                TabDragShadowController.activeDraggedTabId
+            } else {
+                null
+            }
+            val previewTabId = activeDraggedTabId ?: preparedDragTabId
+            val matchedPreviewTab = tabs.firstOrNull { it.tabId == previewTabId }
+            val previewTab = matchedPreviewTab
+                ?: dragShadowSession.lastDraggedTab?.takeIf { isActiveDragSource }
+            val previewMode = if (isActiveDragSource) {
+                TabDragShadowController.activePreviewMode
+            } else {
+                TabDragPreviewMode.MoveToWindow
+            }
+
+            SideEffect {
+                if (isActiveDragSource) {
+                    if (matchedPreviewTab != null) {
+                        dragShadowSession.lastDraggedTab = matchedPreviewTab
+                    }
+                } else {
+                    dragShadowSession.builder = null
+                    dragShadowSession.lastDraggedTab = null
+                }
+            }
+
+            if (previewTab != null) {
+                key(previewTab.tabId) {
+                    OffscreenTabDragShadowCapture(
+                        tab = previewTab,
+                        mode = previewMode,
+                        picture = dragPreviewPicture,
+                        onPictureRecorded = {
+                            if (TabDragShadowController.activeSourceWindowId == windowId) {
+                                dragShadowSession.builder?.let { builder ->
+                                    localView.updateDragShadow(builder)
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .windowInsetsPadding(windowInsets.only(WindowInsetsSides.Horizontal))
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
                 IconButton(
@@ -461,11 +409,8 @@ fun BrowserTabBar(
 
                 val canPopOut = uiState.canPopOut
                 val hasOtherWindows = otherWindows.isNotEmpty()
-                val canPerformActions = canPopOut || hasOtherWindows
-
-                val textMeasurer = rememberTextMeasurer()
-                val openInNewPainter = rememberVectorPainter(Icons.AutoMirrored.Rounded.OpenInNew)
-                val dragPreviewStyle = rememberTabDragPreviewStyle()
+                val canDragTabs = canPopOut || hasOtherWindows
+                val hasMenuActions = canDragTabs || onOpenStateStoreViewer != null
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -492,12 +437,24 @@ fun BrowserTabBar(
                             BrowserTabChip(
                                 windowId = windowId,
                                 tab = tab,
-                                canDrag = canPerformActions,
-                                canDragToNewWindow = canPopOut,
+                                canDrag = canDragTabs,
+                                canDragToNewWindow = canDragToNewWindow,
                                 closingBackProgress = if (tab.isSelected) closingTabBackProgress else zeroProgress,
-                                textMeasurer = textMeasurer,
-                                openInNewPainter = openInNewPainter,
-                                dragPreviewStyle = dragPreviewStyle,
+                                dragPreviewPicture = dragPreviewPicture,
+                                onPrepareDrag = { preparedDragTabId = tab.tabId },
+                                onReleaseDragPreparation = {
+                                    if (preparedDragTabId == tab.tabId) {
+                                        preparedDragTabId = null
+                                    }
+                                },
+                                onDragShadowStarted = { builder ->
+                                    dragShadowSession.builder = builder
+                                    dragShadowSession.lastDraggedTab = tab
+                                },
+                                onDragStartFailed = {
+                                    dragShadowSession.builder = null
+                                    dragShadowSession.lastDraggedTab = null
+                                },
                                 onSelectTab = { onSelectTab(tab.tabId) },
                                 onCloseTab = { onCloseTab(tab.tabId) },
                                 modifier = Modifier
@@ -532,7 +489,7 @@ fun BrowserTabBar(
                 Box {
                     IconButton(
                         onClick = { menuExpanded = true },
-                        enabled = canPerformActions,
+                        enabled = hasMenuActions,
                         modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
@@ -558,186 +515,6 @@ fun BrowserTabBar(
 
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-            )
-        }
-    }
-}
-
-private val TabChipShape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-
-@Composable
-internal fun BrowserTabChip(
-    windowId: String,
-    tab: TabSummary,
-    onSelectTab: () -> Unit,
-    onCloseTab: () -> Unit,
-    modifier: Modifier = Modifier,
-    canDrag: Boolean = true,
-    canDragToNewWindow: Boolean = true,
-    closingBackProgress: () -> Float = { 0f },
-    textMeasurer: TextMeasurer = rememberTextMeasurer(),
-    openInNewPainter: VectorPainter = rememberVectorPainter(Icons.AutoMirrored.Rounded.OpenInNew),
-    dragPreviewStyle: TabDragPreviewStyle = rememberTabDragPreviewStyle(),
-) {
-    val currentOnSelectTab by rememberUpdatedState(onSelectTab)
-    val currentCanDrag by rememberUpdatedState(canDrag)
-    val currentCanDragToNewWindow by rememberUpdatedState(canDragToNewWindow)
-    val currentTab by rememberUpdatedState(tab)
-    val dragOutIntentFactory = LocalBrowserDragOutIntentFactory.current
-    val context = LocalContext.current
-    val localView = LocalView.current
-    val density = LocalDensity.current
-    val layoutDirection = LocalLayoutDirection.current
-    val currentTabIconPainter by rememberUpdatedState(rememberVectorPainter(tab.currentRoute.icon))
-    val currentDragPreviewStyle by rememberUpdatedState(dragPreviewStyle)
-
-    val containerColor = if (tab.isSelected) {
-        MaterialTheme.colorScheme.surface
-    } else {
-        Color.Transparent
-    }
-    val contentColor = if (tab.isSelected) {
-        MaterialTheme.colorScheme.onSurface
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-            .graphicsLayer {
-                val isBeingDragged =
-                    TabDragShadowController.activeSourceWindowId == windowId &&
-                        TabDragShadowController.activeDraggedTabId == tab.tabId
-                val backAlpha = (1f - closingBackProgress() * 0.75f).coerceIn(0f, 1f)
-                val dragAlpha = if (isBeingDragged) 0.38f else 1f
-                alpha = backAlpha * dragAlpha
-            }
-            .clip(TabChipShape)
-            .background(color = containerColor, shape = TabChipShape)
-            .pointerInput(windowId, tab.tabId) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = {
-                        if (!currentCanDrag) return@detectDragGesturesAfterLongPress
-
-                        currentOnSelectTab()
-
-                        val canCreateNewWindow = currentCanDragToNewWindow
-                        val canStartIntentSenderOnUnhandledDrag =
-                            canCreateNewWindow && Build.VERSION.SDK_INT >= 35
-
-                        val payload = TabDragPayload(sourceWindowId = windowId, tabId = tab.tabId)
-                        val intentSender = if (canStartIntentSenderOnUnhandledDrag) {
-                            dragOutIntentFactory.createDragOutPendingIntent(context, windowId, tab.tabId)?.intentSender
-                        } else {
-                            null
-                        }
-
-                        val clipData = payload.toClipData(intentSender)
-
-                        val flags = if (Build.VERSION.SDK_INT >= 35) {
-                            if (canStartIntentSenderOnUnhandledDrag) {
-                                View.DRAG_FLAG_GLOBAL_SAME_APPLICATION or
-                                    View.DRAG_FLAG_START_INTENT_SENDER_ON_UNHANDLED_DRAG
-                            } else {
-                                View.DRAG_FLAG_GLOBAL_SAME_APPLICATION
-                            }
-                        } else {
-                            View.DRAG_FLAG_GLOBAL
-                        }
-
-                        val viewRef = WeakReference(localView)
-                        lateinit var shadowBuilder: TabDragShadowBuilder
-                        val initialMode = TabDragShadowController.startDrag(
-                            sourceWindowId = windowId,
-                            canCreateNewWindow = canCreateNewWindow,
-                            onPreviewModeChanged = { newMode ->
-                                shadowBuilder.mode = newMode
-                                viewRef.get()?.updateDragShadow(shadowBuilder)
-                            },
-                            draggedTabId = tab.tabId,
-                        )
-
-                        shadowBuilder = TabDragShadowBuilder(
-                            density = density,
-                            layoutDirection = layoutDirection,
-                            tab = currentTab,
-                            tabIconPainter = currentTabIconPainter,
-                            openInNewPainter = openInNewPainter,
-                            textMeasurer = textMeasurer,
-                            style = currentDragPreviewStyle,
-                            initialMode = initialMode,
-                        )
-
-                        val started = localView.startDragAndDrop(
-                            clipData,
-                            shadowBuilder,
-                            windowId,
-                            flags,
-                        )
-                        if (!started) {
-                            TabDragShadowController.onDragEnded()
-                        }
-                    },
-                    onDrag = { _, _ -> },
-                )
-            }
-            .selectable(
-                selected = tab.isSelected,
-                onClick = onSelectTab,
-                role = Role.Tab,
-            )
-            .widthIn(min = 100.dp, max = 200.dp)
-            .padding(start = 10.dp, top = 4.dp, bottom = 4.dp, end = 2.dp),
-    ) {
-        Icon(
-            imageVector = tab.currentRoute.icon,
-            contentDescription = null,
-            tint = if (tab.isSelected) MaterialTheme.colorScheme.primary else contentColor.copy(alpha = 0.7f),
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(6.dp))
-
-        Text(
-            text = tab.title,
-            color = contentColor,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (tab.isSelected) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-
-        if (tab.stackDepth > 1) {
-            Spacer(Modifier.width(4.dp))
-            Badge(
-                containerColor = if (tab.isSelected) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                },
-                contentColor = if (tab.isSelected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            ) {
-                Text(
-                    text = tab.stackDepth.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
-        }
-
-        IconButton(
-            onClick = onCloseTab,
-            modifier = Modifier.size(28.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Close,
-                contentDescription = "Close tab",
-                tint = contentColor.copy(alpha = 0.7f),
-                modifier = Modifier.size(14.dp),
             )
         }
     }
@@ -805,43 +582,3 @@ private fun BrowserTabBarPreview() {
         )
     }
 }
-
-@Preview(showBackground = true)
-@Composable
-private fun BrowserTabChipSelectedPreview() {
-    AppStateRecipesTheme {
-        BrowserTabChip(
-            windowId = "win-1",
-            tab = TabSummary(
-                tabId = "tab-1",
-                isSelected = true,
-                stackDepth = 1,
-            ),
-            onSelectTab = {},
-            onCloseTab = {},
-            modifier = Modifier.padding(8.dp),
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun BrowserTabChipUnselectedPreview() {
-    AppStateRecipesTheme {
-        BrowserTabChip(
-            windowId = "win-1",
-            tab = TabSummary(
-                tabId = "tab-2",
-                isSelected = false,
-                stackDepth = 3,
-                currentRoute = BrowserRoute.Article(1, "Multi-Window Guide"),
-            ),
-            onSelectTab = {},
-            onCloseTab = {},
-            modifier = Modifier.padding(8.dp),
-        )
-    }
-}
-
-
-

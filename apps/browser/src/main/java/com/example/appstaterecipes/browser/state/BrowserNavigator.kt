@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.example.appstaterecipes.browser
+package com.example.appstaterecipes.browser.state
 
 import androidx.appstate.datastore.PersistToDataStore
 import androidx.appstate.statestore.StateStore
@@ -23,27 +23,31 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.snapshots.Snapshot
+import com.example.appstaterecipes.browser.BrowserActivity
+import com.example.appstaterecipes.browser.model.BrowserRoute
+import com.example.appstaterecipes.browser.model.EntryId
+import com.example.appstaterecipes.browser.model.WindowState
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
+// [START browser_statestore_keys]
 @Serializable
 private object WindowsKey : StateStoreKey<Map<String, WindowState>>(defaultValue = emptyMap()),
     PersistToDataStore
 
 @Serializable
-private object TabStacksKey :
+private object TabBackStacksKey :
     StateStoreKey<Map<String, List<BrowserRoute>>>(defaultValue = emptyMap()),
     PersistToDataStore
 
 private object ActiveWindowTasksKey : StateStoreKey<Map<String, Int>>(defaultValue = emptyMap())
-
-// [START browser_navigator]
+// [END browser_statestore_keys]
 /**
  * Stateless facade that encapsulates [StateStore] and coordinates multi-tab
  * Navigation 3 back stacks across an arbitrary number of [BrowserActivity] windows.
  *
  * Because all state lives inside [stateStore] under `private` singleton keys ([WindowsKey],
- * [TabStacksKey], and [EntryScrollOffsetsKey]), multiple [BrowserNavigator] instances wrapping
+ * [TabBackStacksKey], and [EntryScrollOffsetsKey]), multiple [BrowserNavigator] instances wrapping
  * the same [StateStore] operate on the exact same windows and tabs, and multiple recipes can
  * share that [StateStore] without key collisions.
  */
@@ -51,24 +55,24 @@ private object ActiveWindowTasksKey : StateStoreKey<Map<String, Int>>(defaultVal
 class BrowserNavigator(
     private val stateStore: StateStore = StateStore(),
     private val idGenerator: () -> String = { UUID.randomUUID().toString().take(8) },
-    val scrollStore: EntryScrollStateStore = EntryScrollStateStore(stateStore),
+    val scrollStateHolder: EntryScrollStateHolder = EntryScrollStateHolder(stateStore),
 ) {
     /**
-     * Registers the persisted browser keys ([WindowsKey], [TabStacksKey], and
+     * Registers the persisted browser keys ([WindowsKey], [TabBackStacksKey], and
      * [EntryScrollOffsetsKey]) in [StateStore] so that [androidx.appstate.datastore.syncToDataStore]
      * can restore them from disk before [BrowserActivity] is opened for the first time.
      */
     fun primeKeys() {
         stateStore.getState(WindowsKey)
-        stateStore.getState(TabStacksKey)
-        scrollStore.primeKey()
+        stateStore.getState(TabBackStacksKey)
+        scrollStateHolder.primeKey()
     }
 
     /**
      * Ensures [windowId] exists in [StateStore]. If it does not exist yet, initializes it
      * with a single tab starting at [initialRoute].
      */
-    fun ensureWindow(
+    internal fun ensureWindow(
         windowId: String,
         initialRoute: BrowserRoute = BrowserRoute.Home,
     ) {
@@ -86,23 +90,21 @@ class BrowserNavigator(
      * @param requestedWindowId An explicit window ID to open, or `null` to attach to an existing
      *                          unattached window or generate a fresh window ID.
      * @param taskId The system task ID of the hosting Activity.
-     * @param initialRoute The route for the initial tab if a new window needs to be created.
      * @return The resolved window ID that was opened and attached.
      */
     fun openWindow(
         requestedWindowId: String? = null,
         taskId: Int,
-        initialRoute: BrowserRoute = BrowserRoute.Home,
     ): String {
         return Snapshot.withMutableSnapshot {
-            val resolvedId = requestedWindowId
-                ?: firstOpenWindowId()
+            val resolvedWindowId = requestedWindowId
+                ?: firstUnattachedWindowId()
                 ?: "win-${idGenerator()}"
 
-            ensureWindow(resolvedId, initialRoute)
-            attachWindowTask(resolvedId, taskId)
+            ensureWindow(resolvedWindowId)
+            attachWindowTask(resolvedWindowId, taskId)
 
-            resolvedId
+            resolvedWindowId
         }
     }
 
@@ -110,60 +112,60 @@ class BrowserNavigator(
      * Returns a consolidated [State] of [BrowserWindowUiState] for [windowId], or `null` if the
      * window has been closed (e.g. after its last tab was closed or moved to another window).
      */
+    // [START browser_derived_ui_state]
     fun windowUiState(windowId: String): State<BrowserWindowUiState?> = derivedStateOf {
         val windows = stateStore.getState(WindowsKey).value
         val window = windows[windowId] ?: return@derivedStateOf null
-        val stacks = stateStore.getState(TabStacksKey).value
-        val activeBackStack = stacks[window.activeTabId].orEmpty()
+        val tabBackStacks = stateStore.getState(TabBackStacksKey).value
+        val activeBackStack = tabBackStacks[window.activeTabId].orEmpty()
         if (activeBackStack.isEmpty()) return@derivedStateOf null
 
         val allSummaries = buildWindowSummaries(
             windows = windows,
-            stacks = stacks,
-            activeTasks = stateStore.getState(ActiveWindowTasksKey).value,
+            tabBackStacks = tabBackStacks,
+            taskIdByWindowId = stateStore.getState(ActiveWindowTasksKey).value,
         )
-        val displayName = allSummaries.find { it.windowId == windowId }?.displayName ?: "Window"
 
         BrowserWindowUiState(
             windowId = windowId,
-            displayName = displayName,
+            displayName = window.displayName,
             activeTabId = window.activeTabId,
-            tabs = buildTabSummaries(window, stacks),
+            tabs = buildTabSummaries(window, tabBackStacks),
             activeBackStack = activeBackStack,
             allWindows = allSummaries,
         )
     }
+    // [END browser_derived_ui_state]
 
     private fun buildTabSummaries(
         window: WindowState,
-        stacks: Map<String, List<BrowserRoute>>,
+        tabBackStacks: Map<String, List<BrowserRoute>>,
     ): List<TabSummary> = window.tabIds.mapNotNull { tabId ->
-        val stack = stacks[tabId] ?: return@mapNotNull null
-        val currentRoute = stack.lastOrNull() ?: return@mapNotNull null
+        val backStack = tabBackStacks[tabId] ?: return@mapNotNull null
+        val currentRoute = backStack.lastOrNull() ?: return@mapNotNull null
         TabSummary(
             tabId = tabId,
             isSelected = tabId == window.activeTabId,
-            stackDepth = stack.size,
+            stackDepth = backStack.size,
             currentRoute = currentRoute,
         )
     }
 
     private fun buildWindowSummaries(
         windows: Map<String, WindowState>,
-        stacks: Map<String, List<BrowserRoute>>,
-        activeTasks: Map<String, Int>,
+        tabBackStacks: Map<String, List<BrowserRoute>>,
+        taskIdByWindowId: Map<String, Int>,
     ): List<WindowSummary> {
-        return windows.values.mapIndexed { index, window ->
-            val displayName = "Window ${index + 1}"
-            val firstTwoTitles = window.tabIds.take(2).mapNotNull { tabId ->
-                stacks[tabId]?.lastOrNull()?.title
+        return windows.values.map { window ->
+            val firstTabTitles = window.tabIds.take(2).mapNotNull { tabId ->
+                tabBackStacks[tabId]?.lastOrNull()?.title
             }
             WindowSummary(
                 windowId = window.windowId,
-                displayName = displayName,
+                displayName = window.displayName,
                 tabCount = window.tabIds.size,
-                firstTabTitles = firstTwoTitles,
-                isAttachedToActivity = window.windowId in activeTasks,
+                firstTabTitles = firstTabTitles,
+                isAttachedToActivity = window.windowId in taskIdByWindowId,
             )
         }
     }
@@ -172,9 +174,9 @@ class BrowserNavigator(
      * Records that [windowId] is currently attached to a live [BrowserActivity] with [taskId].
      * Also clears any previous window mapping that was associated with [taskId].
      */
-    fun attachWindowTask(windowId: String, taskId: Int) {
-        stateStore.updateState(ActiveWindowTasksKey) { tasks ->
-            tasks.filterValues { it != taskId } + (windowId to taskId)
+    internal fun attachWindowTask(windowId: String, taskId: Int) {
+        stateStore.updateState(ActiveWindowTasksKey) { windowTasks ->
+            windowTasks.filterValues { it != taskId } + (windowId to taskId)
         }
     }
 
@@ -182,16 +184,16 @@ class BrowserNavigator(
      * Removes the active task association for [windowId] if it matches [taskId].
      */
     fun detachWindowTask(windowId: String, taskId: Int) {
-        stateStore.updateState(ActiveWindowTasksKey) { tasks ->
-            if (tasks[windowId] == taskId) tasks - windowId else tasks
+        stateStore.updateState(ActiveWindowTasksKey) { windowTasks ->
+            if (windowTasks[windowId] == taskId) windowTasks - windowId else windowTasks
         }
     }
 
     /**
      * Returns the system task ID of the live [BrowserActivity] currently hosting [windowId],
-     * or `null` if [windowId] is not currently open in any live Activity window.
+     * or `null` if [windowId] is not currently attached to any live Activity window.
      */
-    fun taskIdForWindow(windowId: String): Int? =
+    internal fun taskIdForWindow(windowId: String): Int? =
         stateStore.getState(ActiveWindowTasksKey).value[windowId]
 
     /**
@@ -199,28 +201,34 @@ class BrowserNavigator(
      * or `null` if no unattached windows currently exist in [StateStore].
      * Useful when launching the browser activity without an explicit target window ID.
      */
-    fun firstOpenWindowId(): String? {
-        val windows = stateStore.getState(WindowsKey).value.keys
-        val activeTasks = stateStore.getState(ActiveWindowTasksKey).value
-        return windows.firstOrNull { it !in activeTasks }
+    internal fun firstUnattachedWindowId(): String? {
+        val windows = stateStore.getState(WindowsKey).value
+        val taskIdByWindowId = stateStore.getState(ActiveWindowTasksKey).value
+        return windows.keys.firstOrNull { windowId -> windowId !in taskIdByWindowId }
     }
 
     /**
      * Opens a new tab in [windowId] starting at [initialRoute] and selects it.
      */
+    // [START browser_atomic_updates]
     fun newTab(
         windowId: String,
         initialRoute: BrowserRoute = BrowserRoute.Home,
     ): String {
         val newTabId = "tab-${idGenerator()}"
         Snapshot.withMutableSnapshot {
-            stateStore.updateState(TabStacksKey) { stacks ->
-                stacks + (newTabId to listOf(initialRoute))
+            stateStore.updateState(TabBackStacksKey) { tabBackStacks ->
+                tabBackStacks + (newTabId to listOf(initialRoute))
             }
             stateStore.updateState(WindowsKey) { windows ->
                 val window = windows[windowId]
                 if (window == null) {
-                    windows + (windowId to WindowState(windowId, listOf(newTabId), newTabId))
+                    windows + (windowId to WindowState(
+                        windowId = windowId,
+                        tabIds = listOf(newTabId),
+                        activeTabId = newTabId,
+                        windowNumber = nextWindowNumber(windows),
+                    ))
                 } else {
                     windows + (windowId to window.copy(
                         tabIds = window.tabIds + newTabId,
@@ -232,6 +240,7 @@ class BrowserNavigator(
         return newTabId
     }
 
+    // [START_EXCLUDE]
     /**
      * Switches the active tab in [windowId] to [tabId].
      */
@@ -246,7 +255,7 @@ class BrowserNavigator(
     /**
      * Reorders [tabId] within [windowId] to [toIndex].
      *
-     * Because back stacks ([TabStacksKey]) and scroll offsets ([EntryScrollOffsetsKey]) are keyed
+     * Because back stacks ([TabBackStacksKey]) and scroll offsets ([EntryScrollOffsetsKey]) are keyed
      * by `tabId` rather than tab index, reordering only updates [WindowState.tabIds].
      */
     fun moveTab(
@@ -261,11 +270,11 @@ class BrowserNavigator(
             val targetIndex = toIndex.coerceIn(0, window.tabIds.lastIndex)
             if (fromIndex == targetIndex) return@updateState windows
 
-            val reorderedTabs = window.tabIds.toMutableList().apply {
+            val reorderedTabIds = window.tabIds.toMutableList().apply {
                 removeAt(fromIndex)
                 add(targetIndex, tabId)
             }
-            windows + (windowId to window.copy(tabIds = reorderedTabs))
+            windows + (windowId to window.copy(tabIds = reorderedTabIds))
         }
     }
 
@@ -276,25 +285,11 @@ class BrowserNavigator(
         Snapshot.withMutableSnapshot {
             val activeTabId = stateStore.getState(WindowsKey).value[windowId]?.activeTabId
                 ?: return@withMutableSnapshot
-            stateStore.updateState(TabStacksKey) { stacks ->
-                val currentStack = stacks[activeTabId] ?: return@updateState stacks
-                stacks + (activeTabId to (currentStack + route))
+            stateStore.updateState(TabBackStacksKey) { tabBackStacks ->
+                val currentBackStack = tabBackStacks[activeTabId] ?: return@updateState tabBackStacks
+                tabBackStacks + (activeTabId to (currentBackStack + route))
             }
         }
-    }
-
-    /**
-     * Returns the saved vertical scroll offset in pixels for the back-stack item identified by
-     * [entryId], or `0` if none has been recorded.
-     */
-    fun scrollOffset(entryId: String): Int = scrollStore.scrollOffset(entryId)
-
-    /**
-     * Saves the vertical scroll offset [offsetPx] for the back-stack item identified by [entryId].
-     * If the item or its tab has already been popped or closed, this is a no-op.
-     */
-    fun updateScrollOffset(entryId: String, offsetPx: Int) {
-        scrollStore.updateScrollOffset(entryId, offsetPx, ::isActiveBackStackEntry)
     }
 
     /**
@@ -310,14 +305,14 @@ class BrowserNavigator(
             val window = stateStore.getState(WindowsKey).value[windowId]
                 ?: return@withMutableSnapshot
             val activeTabId = window.activeTabId
-            val currentStack = stateStore.getState(TabStacksKey).value[activeTabId].orEmpty()
+            val currentBackStack = stateStore.getState(TabBackStacksKey).value[activeTabId].orEmpty()
 
-            if (currentStack.size > 1) {
-                val poppedEntryId = backStackEntryId(activeTabId, currentStack.lastIndex)
-                stateStore.updateState(TabStacksKey) { stacks ->
-                    stacks + (activeTabId to currentStack.dropLast(1))
+            if (currentBackStack.size > 1) {
+                val poppedEntryId = EntryId.of(activeTabId, currentBackStack.lastIndex).value
+                stateStore.updateState(TabBackStacksKey) { tabBackStacks ->
+                    tabBackStacks + (activeTabId to currentBackStack.dropLast(1))
                 }
-                scrollStore.clearEntry(poppedEntryId)
+                scrollStateHolder.clearEntry(poppedEntryId)
             } else if (window.tabIds.size > 1) {
                 closeTab(windowId, activeTabId)
             }
@@ -325,26 +320,29 @@ class BrowserNavigator(
     }
 
     /**
-     * Closes [tabId] in [windowId] and removes its back stack from [TabStacksKey] and its
+     * Closes [tabId] in [windowId] and removes its back stack from [TabBackStacksKey] and its
      * saved scroll offsets from [EntryScrollOffsetsKey].
      * If [tabId] was the last tab in [windowId], removes [windowId] from [WindowsKey].
      */
+    // [END_EXCLUDE]
     fun closeTab(windowId: String, tabId: String) {
         Snapshot.withMutableSnapshot {
             detachTabFromWindow(windowId, tabId)
-            stateStore.updateState(TabStacksKey) { stacks -> stacks - tabId }
-            scrollStore.clearTabs(setOf(tabId))
+            stateStore.updateState(TabBackStacksKey) { tabBackStacks -> tabBackStacks - tabId }
+            scrollStateHolder.clearTabs(setOf(tabId))
         }
     }
 
+    // [START_EXCLUDE]
     /**
      * Tears off [tabId] from [sourceWindowId] into a newly created window and returns
      * the new `windowId` so the caller can launch a new [BrowserActivity] instance.
      *
-     * Notice that [TabStacksKey] and [EntryScrollOffsetsKey] are not modified: the tab's
+     * Notice that [TabBackStacksKey] and [EntryScrollOffsetsKey] are not modified: the tab's
      * entire Navigation 3 back stack and per-entry scroll positions stay intact in [StateStore]
      * while ownership moves in [WindowsKey].
      */
+    // [END_EXCLUDE]
     fun popOutTabToNewWindow(
         sourceWindowId: String,
         tabId: String,
@@ -362,27 +360,36 @@ class BrowserNavigator(
                 windowId = newWindowId,
                 tabIds = listOf(tabId),
                 activeTabId = tabId,
+                windowNumber = nextWindowNumber(windows),
             ))
         }
         newWindowId
     }
+    // [END browser_atomic_updates]
 
     /**
      * Moves [tabId] (along with its full Navigation 3 back stack and per-entry scroll state)
      * from [sourceWindowId] into [targetWindowId] and selects it in [targetWindowId].
+     *
+     * @return `true` if [tabId] was moved, was the last tab of [sourceWindowId], and
+     * [targetWindowId] is not currently attached to any active Activity task—indicating that
+     * the caller/UI should switch its task/window focus to [targetWindowId].
      */
     fun moveTabToWindow(
         sourceWindowId: String,
         tabId: String,
         targetWindowId: String,
-    ) {
-        if (sourceWindowId == targetWindowId) return
-        Snapshot.withMutableSnapshot {
-            val windowsSnapshot = stateStore.getState(WindowsKey).value
-            val sourceWindow = windowsSnapshot[sourceWindowId] ?: return@withMutableSnapshot
-            if (tabId !in sourceWindow.tabIds || targetWindowId !in windowsSnapshot) {
-                return@withMutableSnapshot
+    ): Boolean {
+        if (sourceWindowId == targetWindowId) return false
+        return Snapshot.withMutableSnapshot {
+            val currentWindows = stateStore.getState(WindowsKey).value
+            val sourceWindow = currentWindows[sourceWindowId] ?: return@withMutableSnapshot false
+            if (tabId !in sourceWindow.tabIds || targetWindowId !in currentWindows) {
+                return@withMutableSnapshot false
             }
+
+            val isLastTabOfSource = sourceWindow.tabIds.size == 1
+            val isTargetUnattached = taskIdForWindow(targetWindowId) == null
 
             detachTabFromWindow(sourceWindowId, tabId)
             stateStore.updateState(WindowsKey) { windows ->
@@ -392,29 +399,9 @@ class BrowserNavigator(
                     activeTabId = tabId,
                 ))
             }
+
+            isLastTabOfSource && isTargetUnattached
         }
-    }
-
-    /**
-     * Transfers [tabId] from [sourceWindowId] into [targetWindowId].
-     *
-     * @return `true` if the tab moved was the last tab of [sourceWindowId], and [targetWindowId]
-     * is not currently attached to any active Activity task—indicating that the caller/UI
-     * should switch its task/window focus to [targetWindowId].
-     */
-    fun receiveTabFromWindow(
-        sourceWindowId: String,
-        tabId: String,
-        targetWindowId: String,
-    ): Boolean = Snapshot.withMutableSnapshot {
-        val windows = stateStore.getState(WindowsKey).value
-        val sourceWindow = windows[sourceWindowId] ?: return@withMutableSnapshot false
-        val isLastTabOfSource = sourceWindow.tabIds.size == 1 && sourceWindow.tabIds.first() == tabId
-        val targetIsUnattached = taskIdForWindow(targetWindowId) == null
-
-        moveTabToWindow(sourceWindowId, tabId, targetWindowId)
-
-        isLastTabOfSource && targetIsUnattached
     }
 
     /**
@@ -422,16 +409,6 @@ class BrowserNavigator(
      */
     fun windowSession(windowId: String): BrowserWindowSession =
         DefaultBrowserWindowSession(this, windowId)
-
-    /**
-     * Returns the list of all current window summaries.
-     */
-    fun windowSummaries(): List<WindowSummary> {
-        val windows = stateStore.getState(WindowsKey).value
-        val stacks = stateStore.getState(TabStacksKey).value
-        val activeTasks = stateStore.getState(ActiveWindowTasksKey).value
-        return buildWindowSummaries(windows, stacks, activeTasks)
-    }
 
     /**
      * Cleans up [windowId] and all of its remaining tabs when the [BrowserActivity] task
@@ -443,51 +420,47 @@ class BrowserNavigator(
                 ?: return@withMutableSnapshot
             val closedTabIds = window.tabIds.toSet()
             stateStore.updateState(WindowsKey) { windows -> windows - windowId }
-            stateStore.updateState(TabStacksKey) { stacks -> stacks - closedTabIds }
-            stateStore.updateState(ActiveWindowTasksKey) { tasks -> tasks - windowId }
-            scrollStore.clearTabs(closedTabIds)
+            stateStore.updateState(TabBackStacksKey) { tabBackStacks -> tabBackStacks - closedTabIds }
+            stateStore.updateState(ActiveWindowTasksKey) { windowTasks -> windowTasks - windowId }
+            scrollStateHolder.clearTabs(closedTabIds)
         }
     }
 
-    private fun parseEntryId(entryId: String): EntryId? = EntryId.parse(entryId)
-
     fun isActiveBackStackEntry(entryId: String): Boolean {
-        val parsed = parseEntryId(entryId) ?: return false
-        val stackIndex = parsed.stackIndex ?: return false
-        val stack = stateStore.getState(TabStacksKey).value[parsed.tabId] ?: return false
-        return stackIndex in stack.indices
+        val parsedEntryId = EntryId.parse(entryId) ?: return false
+        val stackIndex = parsedEntryId.stackIndex ?: return false
+        val backStack = stateStore.getState(TabBackStacksKey).value[parsedEntryId.tabId] ?: return false
+        return stackIndex in backStack.indices
     }
 
     private fun detachTabFromWindow(windowId: String, tabId: String) {
         var windowRemoved = false
         stateStore.updateState(WindowsKey) { windows ->
             val window = windows[windowId] ?: return@updateState windows
-            val closedIndex = window.tabIds.indexOf(tabId)
-            if (closedIndex == -1) return@updateState windows
+            val removedIndex = window.tabIds.indexOf(tabId)
+            if (removedIndex == -1) return@updateState windows
 
-            val remainingTabs = window.tabIds - tabId
-            if (remainingTabs.isEmpty()) {
+            val remainingTabIds = window.tabIds - tabId
+            if (remainingTabIds.isEmpty()) {
                 windowRemoved = true
                 windows - windowId
             } else {
                 val nextActiveTabId = if (window.activeTabId == tabId) {
-                    remainingTabs[closedIndex.coerceAtMost(remainingTabs.lastIndex)]
+                    remainingTabIds[removedIndex.coerceAtMost(remainingTabIds.lastIndex)]
                 } else {
                     window.activeTabId
                 }
                 windows + (windowId to window.copy(
-                    tabIds = remainingTabs,
+                    tabIds = remainingTabIds,
                     activeTabId = nextActiveTabId,
                 ))
             }
         }
         if (windowRemoved) {
-            stateStore.updateState(ActiveWindowTasksKey) { tasks -> tasks - windowId }
+            stateStore.updateState(ActiveWindowTasksKey) { windowTasks -> windowTasks - windowId }
         }
     }
 
-    companion object {
-        fun backStackEntryId(tabId: String, stackIndex: Int): String = "$tabId:$stackIndex"
-    }
+    private fun nextWindowNumber(windows: Map<String, WindowState>): Int =
+        (windows.values.maxOfOrNull { it.windowNumber } ?: 0) + 1
 }
-// [END browser_navigator]

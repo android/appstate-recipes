@@ -37,15 +37,18 @@ android {
 }
 
 dependencies {
-    implementation(platform(libs.androidx.compose.bom))
+    // Exposed in :core's public API (StateStoreOwner.stateStore, AppStateRecipesTheme,
+    // PaddingValues helpers, StateStore viewer state types), so consumers get them transitively.
+    api(platform(libs.androidx.compose.bom))
+    api(libs.androidx.compose.material3)
+    api(libs.androidx.compose.ui)
+    api(libs.androidx.compose.ui.graphics)
+    api(libs.androidx.appstate.statestore)
+
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appstate.statestore)
     implementation(libs.androidx.appstate.statestore.datastore)
     testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)

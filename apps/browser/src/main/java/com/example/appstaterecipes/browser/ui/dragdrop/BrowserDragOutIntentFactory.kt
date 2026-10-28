@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.example.appstaterecipes.browser.ui
+package com.example.appstaterecipes.browser.ui.dragdrop
 
 import android.app.PendingIntent
 import android.content.Context
@@ -22,7 +22,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 
 /**
  * Interface that provides platform-level drag-out pending intents to UI components
- * without coupling the `ui` package directly to `BrowserActivity`.
+ * without coupling the UI layer directly to `BrowserActivity`.
  */
 fun interface BrowserDragOutIntentFactory {
     fun createDragOutPendingIntent(

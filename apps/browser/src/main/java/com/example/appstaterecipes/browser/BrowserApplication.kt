@@ -17,76 +17,68 @@
 package com.example.appstaterecipes.browser
 
 import android.app.Application
-import android.os.Looper
-import androidx.appstate.datastore.PersistToDataStore
 import androidx.appstate.datastore.syncToDataStore
 import androidx.appstate.statestore.StateStore
-import androidx.appstate.transform.transform
-import androidx.compose.runtime.State
-import androidx.compose.runtime.snapshots.ObserverHandle
-import androidx.compose.runtime.snapshots.Snapshot
 import com.example.appstaterecipes.StateStoreOwner
+import com.example.appstaterecipes.browser.state.BrowserNavigator
+import java.io.File
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.File
-import java.util.Collections
 
+// [START browser_datastore_sync]
 class BrowserApplication : Application(), StateStoreOwner {
     override val stateStore: StateStore = StateStore()
 
+    // [START_EXCLUDE]
     /**
-     * Completes once all primed [PersistToDataStore] keys have completed their initial restore
-     * pass from [syncToDataStore].
+     * Completes after a short startup delay to allow [syncToDataStore] to hydrate persisted keys
+     * from disk before [BrowserActivity] opens its initial window.
+     *
+     * TODO: Replace this fixed delay once `syncToDataStore` in `androidx.appstate` exposes an API
+     *  or callback signaling when initial DataStore restoration has completed.
      */
-    val isRestored: CompletableDeferred<Unit> = CompletableDeferred()
+    val initialRestoreComplete: CompletableDeferred<Unit> = CompletableDeferred()
+    // [END_EXCLUDE]
 
-    private val applicationScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val dataStoreScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val mainSyncScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun onCreate() {
         super.onCreate()
-        // Prime androidx.appstate.transform's GlobalSnapshotManager on Dispatchers.Main
-        // before any Dispatchers.Default transform/listener (such as syncToDataStore) starts.
-        // Compose UI's SnapshotStateObserver and Transition animations require
-        // Snapshot.sendApplyNotifications() to run on the main UI thread.
-        CoroutineScope(Dispatchers.Main).apply {
-            transform(initialValue = Unit, scope = this, dispatcher = Dispatchers.Main) {}
-            cancel()
-        }
-
         // Prime persisted browser keys in StateStore so syncToDataStore restores them from disk
         // at app startup before BrowserActivity opens a window.
         BrowserNavigator(stateStore).primeKeys()
 
-        val persistedKeyCount = stateStore.keys.count { it is PersistToDataStore }
-        if (persistedKeyCount == 0) {
-            isRestored.complete(Unit)
-        } else {
-            // Inside syncToDataStore, each primed PersistToDataStore key runs a LaunchedEffect(key)
-            // on Dispatchers.Default that reads DataStore, calls stateStore.setState(key, decoded),
-            // and finally sets its internal `restored.value = true`. Observing those `restored`
-            // state transitions tells us deterministically when all primed keys have been hydrated.
-            val restoredKeyStates = Collections.synchronizedSet(mutableSetOf<State<*>>())
-            lateinit var observerHandle: ObserverHandle
-            observerHandle = Snapshot.registerGlobalWriteObserver { stateObject ->
-                if (Looper.myLooper() != Looper.getMainLooper()) {
-                    val state = stateObject as? State<*> ?: return@registerGlobalWriteObserver
-                    if (state.value == true && restoredKeyStates.add(state)) {
-                        if (restoredKeyStates.size >= persistedKeyCount) {
-                            observerHandle.dispose()
-                            isRestored.complete(Unit)
-                        }
-                    }
-                }
-            }
+        val dataStoreFile = File(filesDir, "appstate_statestore.preferences_pb")
+        // Launching syncToDataStore on Dispatchers.Main means its internal listener runs on
+        // Dispatchers.Main (forwarding the calling CoroutineContext's dispatcher to
+        // GlobalSnapshotManager.ensureStarted), while DataStore file I/O runs on dataStoreScope
+        // (Dispatchers.IO).
+        mainSyncScope.launch {
+            stateStore.syncToDataStore(dataStoreFile.absolutePath, dataStoreScope)
         }
 
-        val dataStoreFile = File(filesDir, "appstate_statestore.preferences_pb")
-        applicationScope.launch {
-            stateStore.syncToDataStore(dataStoreFile.absolutePath, applicationScope)
+        // [START_EXCLUDE]
+        // Hacky workaround: `syncToDataStore` runs indefinitely and does not yet signal when the
+        // initial disk read has populated all keys. Wait briefly on cold process start so
+        // BrowserActivity doesn't open/overwrite a window before persisted tabs are hydrated.
+        // TODO: Address initial restore completion signaling in the androidx.appstate library.
+        mainSyncScope.launch {
+            delay(INITIAL_RESTORE_DELAY)
+            initialRestoreComplete.complete(Unit)
         }
+        // [END_EXCLUDE]
     }
+
+    // [START_EXCLUDE]
+    private companion object {
+        val INITIAL_RESTORE_DELAY = 250.milliseconds
+    }
+    // [END_EXCLUDE]
 }
+// [END browser_datastore_sync]

@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-package com.example.appstaterecipes.browser
+package com.example.appstaterecipes.browser.state
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
+import com.example.appstaterecipes.browser.model.BrowserRoute
 
 /**
  * Window-scoped session that provides a cohesive interface for UI interactions within
@@ -51,8 +52,6 @@ interface BrowserWindowSession {
      */
     fun receiveTabFromWindow(sourceWindowId: String, tabId: String): Boolean
 
-    fun windowSummaries(): List<WindowSummary>
-
     /**
      * Checks if [entryId] is currently an active entry on any tab's back stack.
      */
@@ -67,8 +66,7 @@ internal class DefaultBrowserWindowSession(
     override val windowId: String,
 ) : BrowserWindowSession {
 
-    override val uiState: State<BrowserWindowUiState?>
-        get() = navigator.windowUiState(windowId)
+    override val uiState: State<BrowserWindowUiState?> = navigator.windowUiState(windowId)
 
     override fun navigate(route: BrowserRoute) {
         navigator.navigate(windowId, route)
@@ -99,15 +97,11 @@ internal class DefaultBrowserWindowSession(
     }
 
     override fun receiveTabFromWindow(sourceWindowId: String, tabId: String): Boolean {
-        return navigator.receiveTabFromWindow(
+        return navigator.moveTabToWindow(
             sourceWindowId = sourceWindowId,
             tabId = tabId,
             targetWindowId = windowId,
         )
-    }
-
-    override fun windowSummaries(): List<WindowSummary> {
-        return navigator.windowSummaries()
     }
 
     override fun isActiveBackStackEntry(entryId: String): Boolean {
@@ -127,4 +121,3 @@ fun rememberBrowserWindowSession(
         navigator.windowSession(windowId)
     }
 }
-

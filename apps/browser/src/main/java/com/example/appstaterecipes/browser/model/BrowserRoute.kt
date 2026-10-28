@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 
-package com.example.appstaterecipes.browser
+package com.example.appstaterecipes.browser.model
 
+import androidx.compose.runtime.Immutable
 import androidx.navigation3.runtime.NavKey
 import kotlinx.serialization.Serializable
 
 // [START browser_routes]
+@Immutable
 @Serializable
 sealed interface BrowserRoute : NavKey {
     val title: String

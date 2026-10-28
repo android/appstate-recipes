@@ -1,201 +1,111 @@
-# Recipe: Browser-Style Multi-Window & Multi-Tab Navigation with Navigation 3 and `StateStore`
+# Browser Recipe: Multi-Window & Multi-Tab Navigation with Navigation 3 and StateStore
 
-## When to Use `StateStore` with Navigation 3
+This recipe demonstrates how to coordinate **Navigation 3** back stacks across multiple concurrent `Activity` windows and tabs using an application-scoped `StateStore` with DataStore persistence (`PersistToDataStore`).
 
-In a standard single-`Activity` Compose app where only UI components inside that `Activity` read and write the back stack, hoisting navigation into an application-scoped `StateStore` is unnecessary—`rememberNavBackStack()` already provides Compose snapshot observation, configuration-change survival, and `SavedState` process-death restoration.
+## Why `StateStore` with Navigation 3?
 
-Hoisting Navigation 3 back stacks into `StateStore` solves a genuine architectural problem when navigation state must **cross `Activity` or component boundaries within the same process**.
+In a single-`Activity` app, [`rememberNavBackStack()`](https://developer.android.com/guide/navigation/navigation-3/save-state) is sufficient—it provides Compose snapshot observation, configuration-change survival, and `SavedState` restoration.
 
-### Scenario: Browser-Style Multi-Tab & Multi-Window Navigation
-
-On large screens, foldables, ChromeOS, and desktop windowing, Android allows an app to run **an arbitrary number of concurrent `Activity` windows** side-by-side (`FLAG_ACTIVITY_NEW_DOCUMENT | FLAG_ACTIVITY_MULTIPLE_TASK | FLAG_ACTIVITY_LAUNCH_ADJACENT`). In a browser-style or document-workspace app:
-
-1. **Multiple windows (`windowId`):** Each `BrowserActivity` instance represents an independent window with its own tab bar.
-2. **Multiple tab back stacks (`tabId`):** Every tab has its own full Navigation 3 back stack (`List<BrowserRoute>`).
-3. **Cross-window tab tear-off ("Pop out") and merging ("Move to window"):** A user can navigate deep inside a tab (`Home -> Search("compose") -> Article(42)`), **pop that tab out** into a brand-new adjacent `Activity` window (via the menu or Android 15+ cross-window drag-and-drop), or **move/merge the tab** into another existing `Activity` window—preserving its entire Navigation 3 back stack history.
-
-Because `rememberNavBackStack()` is bound to a single `Activity`'s composition and `SavedStateRegistry`, it cannot transfer live back stacks between `Activity` instances. Storing the window registry and tab back stacks in an application-scoped `StateStore` encapsulated behind a `BrowserNavigator` makes cross-window tab transfers a single atomic state update.
+Hoisting Navigation 3 state into `StateStore` is useful when navigation state must **cross `Activity` boundaries within the same process**. Across phones (split-screen or separate tasks in Recents), foldables, tablets, and desktop windowing, Android can run multiple `Activity` instances concurrently. Because `rememberNavBackStack()` is bound to a single `Activity`, it cannot transfer live tabs between windows. Storing window and tab state in an app-scoped `StateStore` makes cross-window tab tear-off ("Pop out"), drag-and-drop, and merging atomic state updates.
 
 ```mermaid
 flowchart LR
     subgraph AppScope["Application Scope (BrowserNavigator)"]
         direction TB
-        SS["StateStore (private)"]
+        SS["StateStore"]
         WK["WindowsKey: Map&lt;WindowId, WindowState&gt;"]
-        TK["TabStacksKey: Map&lt;TabId, List&lt;BrowserRoute&gt;&gt;"]
+        TK["TabBackStacksKey: Map&lt;TabId, List&lt;BrowserRoute&gt;&gt;"]
+        SK["EntryScrollOffsetsKey: Map&lt;EntryId, Int&gt;"]
         AK["ActiveWindowTasksKey: Map&lt;WindowId, TaskId&gt;"]
         SS --- WK
         SS --- TK
+        SS --- SK
         SS --- AK
     end
 
-    subgraph WinA["BrowserActivity (windowId = win-1)"]
+    subgraph WinA["BrowserActivity (win-1)"]
         direction TB
         TabsA["Tab Bar: [tab-1*, tab-2]"]
-        NavA["NavDisplay (backStack = tab-1)"]
+        NavA["NavDisplay (tab-1)"]
     end
 
-    subgraph WinB["BrowserActivity (windowId = win-2)"]
+    subgraph WinB["BrowserActivity (win-2)"]
         direction TB
         TabsB["Tab Bar: [tab-3*]"]
-        NavB["NavDisplay (backStack = tab-3)"]
+        NavB["NavDisplay (tab-3)"]
     end
 
-    WK -- "windowUiState(win-1)" --> TabsA
-    TK -- "windowUiState(win-1)" --> NavA
-    WK -- "windowUiState(win-2)" --> TabsB
-    TK -- "windowUiState(win-2)" --> NavB
+    WK & TK & AK -- "windowUiState(win-1)" --> TabsA & NavA
+    WK & TK & AK -- "windowUiState(win-2)" --> TabsB & NavB
 ```
 
 ---
 
-## Core Design Patterns Used in This Recipe
+## Package Structure
 
-### 1. Focused Singleton `object` Map Keys (`WindowsKey`, `TabStacksKey`, `EntryScrollOffsetsKey`, `ActiveWindowTasksKey`)
-Rather than creating parameterized `data class` keys per tab or putting everything into one monolithic object, state is split across focused singleton keys:
-- **`WindowsKey` (`Map<String, WindowState>`):** Maps each `windowId` to its ordered `tabIds: List<String>` and `activeTabId: String` (persisted with `@PersistToDataStore` in [`BrowserNavigator.kt`](BrowserNavigator.kt)).
-- **`TabStacksKey` (`Map<String, List<BrowserRoute>>`):** Maps each `tabId` to its Navigation 3 back stack (`List<BrowserRoute>`, persisted with `@PersistToDataStore` in [`BrowserNavigator.kt`](BrowserNavigator.kt)).
-- **`EntryScrollOffsetsKey` (`Map<String, Int>`):** Maps each back-stack item's `entryId` (`"$tabId:$stackIndex"`) to its vertical scroll offset in pixels (persisted with `@PersistToDataStore` in [`EntryScrollStateStore.kt`](EntryScrollStateStore.kt)).
-- **`ActiveWindowTasksKey` (`Map<String, Int>`):** Tracks which `windowId`s are currently attached to live `BrowserActivity` tasks (`taskId`) in memory ([`BrowserNavigator.kt`](BrowserNavigator.kt)).
+The module separates core `StateStore` + Navigation 3 state management from Android multi-window launching and Compose UI chrome:
 
-**Why this split works well:**
-- **Zero-copy tab moves:** Moving `tab-2` from `win-1` to `win-2` (or popping it out into `win-3`) **only mutates `WindowsKey`**. The tab's back stack in `TabStacksKey` is untouched, so no `NavDisplay` observing unaffected tabs recomposes.
-- **Clean memory reclamation on tab close:** `StateStore` does not expose a public `removeState(key)` method for dynamically generated keys. Storing tab stacks in `TabStacksKey`'s immutable `Map` allows `closeTab` to drop closed stacks cleanly via `stacks - tabId`.
-- **Atomic cross-key updates:** Mutations that touch multiple keys (`ensureWindow`, `newTab`, `closeTab`, `popOutTabToNewWindow`, `moveTabToWindow`, `closeWindow`) are wrapped in `Snapshot.withMutableSnapshot { ... }` so observers never see a partially updated state.
-- **`@PersistToDataStore` compatibility:** Because `statestore-datastore` keys persisted entries by `key::class.qualifiedName`, singleton `object` keys avoid storage key collisions, while keeping transient runtime state (`ActiveWindowTasksKey`) out of disk persistence.
-
-### 2. Immutable `List<BrowserRoute>` per Tab (Avoiding the `defaultValue` Singleton Trap)
-`NavDisplay` accepts `backStack: List<T>`. Storing an immutable `List<BrowserRoute>` in `TabStacksKey` and updating it via `stateStore.updateState(TabStacksKey) { ... }` avoids storing a mutable `SnapshotStateList` or `NavBackStack` inside `StateStoreKey.defaultValue` (where in-place `.add()` mutations would corrupt the singleton `defaultValue` across resets and bypass `StateStore` assignment listeners).
-
-### 3. Encapsulated `BrowserNavigator` Facade with Consolidated `derivedStateOf` UI State
-Raw `StateStore` and `StateStoreKey`s are kept `private` inside `BrowserNavigator`:
-- **Shared app-wide `StateStore`, isolated keys:** Multiple features or recipes in the same app share a single `StateStore` instance via `StateStoreOwner` because `WindowsKey`, `TabStacksKey`, and `ActiveWindowTasksKey` are `private` to `BrowserNavigator`.
-- **Write safety:** UI screens and `Activity` instances cannot arbitrarily overwrite or clear keys; they call domain methods (`navigate`, `goBack`, `newTab`, `popOutTabToNewWindow`, `moveTabToWindow`, `closeWindow`).
-- **Scoped recomposition via `windowUiState(windowId)`:** `navigator.windowUiState(windowId)` returns a `derivedStateOf`-backed `State<BrowserWindowUiState?>` combining the window's active tab, tab bar summaries, active back stack, and open window list.
+- **[`browser/`](src/main/java/com/example/appstaterecipes/browser)**: App and window entry points ([`BrowserApplication.kt`](src/main/java/com/example/appstaterecipes/browser/BrowserApplication.kt), [`BrowserActivity.kt`](src/main/java/com/example/appstaterecipes/browser/BrowserActivity.kt)).
+- **[`browser/model/`](src/main/java/com/example/appstaterecipes/browser/model)**: Serializable navigation routes, back-stack keys, and persisted window models ([`BrowserRoute.kt`](src/main/java/com/example/appstaterecipes/browser/model/BrowserRoute.kt), [`EntryId.kt`](src/main/java/com/example/appstaterecipes/browser/model/EntryId.kt), [`BrowserStateModels.kt`](src/main/java/com/example/appstaterecipes/browser/model/BrowserStateModels.kt)).
+- **[`browser/state/`](src/main/java/com/example/appstaterecipes/browser/state)**: Core `StateStore` coordination, window-scoped UI sessions, UI read-models, and per-entry scroll persistence ([`BrowserNavigator.kt`](src/main/java/com/example/appstaterecipes/browser/state/BrowserNavigator.kt), [`BrowserWindowSession.kt`](src/main/java/com/example/appstaterecipes/browser/state/BrowserWindowSession.kt), [`BrowserWindowUiState.kt`](src/main/java/com/example/appstaterecipes/browser/state/BrowserWindowUiState.kt), [`EntryScrollStateHolder.kt`](src/main/java/com/example/appstaterecipes/browser/state/EntryScrollStateHolder.kt)).
+- **[`browser/window/`](src/main/java/com/example/appstaterecipes/browser/window)**: Multi-instance `Activity` `Intent` builders and freeform window bounds cascading ([`BrowserWindowLauncher.kt`](src/main/java/com/example/appstaterecipes/browser/window/BrowserWindowLauncher.kt)).
+- **[`browser/ui/`](src/main/java/com/example/appstaterecipes/browser/ui)**: Window scaffold ([`BrowserWindowScreen.kt`](src/main/java/com/example/appstaterecipes/browser/ui/BrowserWindowScreen.kt)), menus ([`BrowserWindowMenus.kt`](src/main/java/com/example/appstaterecipes/browser/ui/BrowserWindowMenus.kt)), and subpackages for [`tabbar/`](src/main/java/com/example/appstaterecipes/browser/ui/tabbar), cross-window [`dragdrop/`](src/main/java/com/example/appstaterecipes/browser/ui/dragdrop), and destination [`panes/`](src/main/java/com/example/appstaterecipes/browser/ui/panes).
 
 ---
 
-## Key Code Structure
+## Core Design Patterns
 
-### 1. `@Serializable` Navigation 3 Routes ([`BrowserRoute.kt`](BrowserRoute.kt))
+### 1. Separating Window, Tab, and Scroll State
+Instead of one monolithic state object, browser state is split across four `StateStoreKey` objects (see [`BrowserNavigator.kt`](src/main/java/com/example/appstaterecipes/browser/state/BrowserNavigator.kt) and [`EntryScrollStateHolder.kt`](src/main/java/com/example/appstaterecipes/browser/state/EntryScrollStateHolder.kt)):
+
+| Key | Type | Persisted | Purpose |
+| :--- | :--- | :---: | :--- |
+| `WindowsKey` | `Map<String, WindowState>` | Yes | Maps `windowId` to its stable `windowNumber`, ordered `tabIds`, and `activeTabId`. |
+| `TabBackStacksKey` | `Map<String, List<BrowserRoute>>` | Yes | Maps `tabId` to its Navigation 3 back stack. |
+| `EntryScrollOffsetsKey` | `Map<String, Int>` | Yes | Maps `entryId` (`"$tabId:$stackIndex"`) to its scroll offset in pixels. |
+| `ActiveWindowTasksKey` | `Map<String, Int>` | No | Maps `windowId` to the currently attached Android `Activity` `taskId`. |
+
+**Why this split works:**
+- **Zero-copy tab transfers:** Moving or popping out a tab between windows only mutates `WindowsKey`. Its back stack in `TabBackStacksKey` and scroll offsets in `EntryScrollOffsetsKey` are untouched, avoiding unnecessary recompositions.
+- **Clean memory reclamation:** Because `StateStore` does not remove dynamically generated keys, storing tab stacks inside `TabBackStacksKey`'s immutable `Map` lets `closeTab` drop closed tabs cleanly.
+- **Atomic multi-key updates:** Operations touching multiple keys (`openWindow`, `newTab`, `closeTab`, etc.) run inside `Snapshot.withMutableSnapshot { ... }` so observers never see partial state updates.
+- **Opt-in persistence per key:** Because individual `StateStoreKey` objects opt in by implementing `PersistToDataStore` (alongside `@Serializable`), durable state (`WindowsKey`, `TabBackStacksKey`, `EntryScrollOffsetsKey`) is saved to DataStore while transient runtime state (`ActiveWindowTasksKey`) stays strictly in-memory.
+
+### 2. Immutable `List<BrowserRoute>` Back Stacks
+`NavDisplay` accepts `backStack: List<T>`. Storing an immutable `List<BrowserRoute>` per tab and updating via `stateStore.updateState(TabBackStacksKey) { ... }` avoids putting a mutable collection inside `StateStoreKey.defaultValue`, which would corrupt the singleton default across resets and bypass `StateStore` write notifications.
+
+### 3. Hiding `StateStore` Behind `BrowserNavigator` & `BrowserWindowSession`
+UI code never reads or writes `StateStore` keys directly—the keys are encapsulated inside [`BrowserNavigator`](src/main/java/com/example/appstaterecipes/browser/state/BrowserNavigator.kt) (`private`) and [`EntryScrollStateHolder`](src/main/java/com/example/appstaterecipes/browser/state/EntryScrollStateHolder.kt) (`internal`):
+- **Encapsulated keys in a shared store:** Multiple features can share a single app-wide `StateStore` without accidentally reading or modifying each other's state.
+- **Simple per-window state and actions:** Each window creates a [`BrowserWindowSession`](src/main/java/com/example/appstaterecipes/browser/state/BrowserWindowSession.kt) for its `windowId`. It exposes that window's current UI state (`uiState`) and actions (`navigate`, `goBack`, `newTab`, `selectTab`, `closeTab`, `moveTab`, `popOutTab`, `receiveTabFromWindow`) so composables don't need to pass `windowId` around.
 
 ```kotlin
-@Serializable
-sealed interface BrowserRoute : NavKey {
-    val title: String
-
-    @Serializable
-    data object Home : BrowserRoute {
-        override val title: String = "Home"
-    }
-
-    @Serializable
-    data class Search(val query: String) : BrowserRoute {
-        override val title: String = "Search: $query"
-    }
-
-    @Serializable
-    data class Article(val id: Int, val headline: String) : BrowserRoute {
-        override val title: String = headline
+fun closeTab(windowId: String, tabId: String) {
+    Snapshot.withMutableSnapshot {
+        detachTabFromWindow(windowId, tabId)
+        stateStore.updateState(TabBackStacksKey) { tabBackStacks -> tabBackStacks - tabId }
+        scrollStateHolder.clearTabs(setOf(tabId))
     }
 }
 ```
 
-### 2. Window and Tab Lifecycle Operations in [`BrowserNavigator.kt`](BrowserNavigator.kt)
+### 4. Preserving Scroll Position Across Windows (`BackStackItem` & `EntryScrollStateHolder`)
+Each screen on a tab's back stack is wrapped in a [`BackStackItem(tabId, stackIndex, route)`](src/main/java/com/example/appstaterecipes/browser/model/BrowserStateModels.kt) with a unique [`EntryId`](src/main/java/com/example/appstaterecipes/browser/model/EntryId.kt) (`"$tabId:$stackIndex"`), so even duplicate routes on the same tab have separate state.
 
-```kotlin
-fun openWindow(
-    requestedWindowId: String? = null,
-    taskId: Int,
-    initialRoute: BrowserRoute = BrowserRoute.Home,
-): String = Snapshot.withMutableSnapshot {
-    val resolvedId = requestedWindowId
-        ?: firstOpenWindowId()
-        ?: "win-${idGenerator()}"
-
-    ensureWindow(resolvedId, initialRoute)
-    attachWindowTask(resolvedId, taskId)
-
-    resolvedId
-}
-
-fun moveTab(
-    windowId: String,
-    tabId: String,
-    toIndex: Int,
-) {
-    stateStore.updateState(WindowsKey) { windows ->
-        val window = windows[windowId] ?: return@updateState windows
-        val fromIndex = window.tabIds.indexOf(tabId)
-        if (fromIndex == -1 || fromIndex == toIndex) return@updateState windows
-
-        val mutableTabs = window.tabIds.toMutableList()
-        mutableTabs.removeAt(fromIndex)
-        val targetIndex = toIndex.coerceIn(0, mutableTabs.size)
-        mutableTabs.add(targetIndex, tabId)
-
-        windows + (windowId to window.copy(tabIds = mutableTabs))
-    }
-}
-
-fun popOutTabToNewWindow(
-    sourceWindowId: String,
-    tabId: String,
-): String? = Snapshot.withMutableSnapshot {
-    val sourceWindow = stateStore.getState(WindowsKey).value[sourceWindowId]
-        ?: return@withMutableSnapshot null
-    if (sourceWindow.tabIds.size <= 1 || tabId !in sourceWindow.tabIds) {
-        return@withMutableSnapshot null
-    }
-
-    val newWindowId = "win-${idGenerator()}"
-    detachTabFromWindow(sourceWindowId, tabId)
-    stateStore.updateState(WindowsKey) { windows ->
-        windows + (newWindowId to WindowState(
-            windowId = newWindowId,
-            tabIds = listOf(tabId),
-            activeTabId = tabId,
-        ))
-    }
-    newWindowId
-}
-```
-
-### 3. Per-Entry State Preservation Across Windows (`BackStackItem` & `EntryScrollStateStore`)
-
-Each item on the active tab's stack is projected as a `BackStackItem(tabId = activeTabId, index = index, route = route)` and keyed in `NavDisplay` by `clazzContentKey = { it.contentKey }` (where `contentKey` is `"$entryId:$route"` and `entryId` is `EntryId.of(tabId, index).value`). Scroll state is managed by `EntryScrollStateStore` via `rememberEntryScrollState(entryId, scrollStore, isValidEntry = { session.isActiveBackStackEntry(it) })`. Reads use `Snapshot.withoutReadObservation` so scroll writes do not trigger UI recompositions, and disposal updates are guarded so popped entries do not overwrite cleared state. This preserves each back-stack item's scroll position across tab switches, duplicate routes on the same stack, intra-window tab reordering, cross-window tab moves, and app restarts:
-
-```kotlin
-val provider = remember(scrollStore, session) {
-    entryProvider<BackStackItem> {
-        entry<BackStackItem>(clazzContentKey = { it.contentKey }) { item ->
-            val scrollState = rememberEntryScrollState(
-                entryId = item.entryId,
-                scrollStore = scrollStore,
-                isValidEntry = { session.isActiveBackStackEntry(item.entryId) },
-            )
-            when (val route = item.route) {
-                is BrowserRoute.Home -> HomePane(scrollState = scrollState, ...)
-                is BrowserRoute.Search -> SearchPane(query = route.query, scrollState = scrollState, ...)
-                is BrowserRoute.Article -> ArticlePane(article = route, scrollState = scrollState, ...)
-            }
-        }
-    }
-}
-
-NavDisplay(
-    backStack = uiState.activeBackStackItems,
-    onBack = { session.goBack() },
-    entryProvider = provider,
-    // ...
-)
-```
+[`EntryScrollStateHolder`](src/main/java/com/example/appstaterecipes/browser/state/EntryScrollStateHolder.kt) and `rememberEntryScrollState(...)` save and restore each screen's scroll position in `StateStore`:
+- **No extra recompositions while scrolling:** Scroll offsets are read only once when a screen enters composition (`Snapshot.withoutReadObservation`) and saved when scrolling stops or the screen leaves composition.
+- **Automatic cleanup on back/close:** When a screen is popped or a tab is closed, its saved scroll offset is removed from `StateStore`.
+- **Works everywhere:** Scroll position is preserved when switching tabs, visiting the same route twice in one tab, moving a tab to another window, or restarting the app.
 
 ---
 
-## Persisting Tabs Across App Restarts (`@PersistToDataStore`)
+### 5. Persistence & Startup Restoration (`PersistToDataStore`)
 
-Because `WindowsKey`, `TabStacksKey`, `WindowState`, and `BrowserRoute` are `@Serializable` and use singleton `object` keys, they work directly with `stateStore.syncToDataStore(...)` in `BrowserApplication`:
+[`BrowserApplication`](src/main/java/com/example/appstaterecipes/browser/BrowserApplication.kt) synchronizes `@Serializable` singleton `PersistToDataStore` keys to disk using `stateStore.syncToDataStore(...)`:
 
-1. **Key priming & awaiting restoration on startup (`primeKeys()` + `isRestored`):** `BrowserApplication.onCreate()` calls `BrowserNavigator(stateStore).primeKeys()` before launching `syncToDataStore` and exposes `isRestored: CompletableDeferred<Unit>`, which `BrowserActivity` awaits before calling `navigator.openWindow(...)` so `WindowsKey`, `TabStacksKey`, and `EntryScrollOffsetsKey` are hydrated from disk before a window is opened.
-2. **Preserving sessions when leaving `BrowserActivity`:** `BrowserActivity.onDestroy()` detaches the `Activity`'s `taskId` (`navigator.detachWindowTask(windowId, taskId)`) without deleting the window from `WindowsKey`. Unattached windows remain available to reattach on the next launch (`firstOpenWindowId()`) or via the window switcher menu, and are only deleted when the user explicitly closes a window or its last tab.
+1. **Key priming & awaiting initial restore:** `BrowserApplication.onCreate()` calls `BrowserNavigator(stateStore).primeKeys()` before starting `syncToDataStore` and exposes `initialRestoreComplete: CompletableDeferred<Unit>`. [`BrowserActivity`](src/main/java/com/example/appstaterecipes/browser/BrowserActivity.kt) awaits `initialRestoreComplete` before resolving any incoming window/drag-out `Intent` via [`BrowserWindowLauncher`](src/main/java/com/example/appstaterecipes/browser/window/BrowserWindowLauncher.kt) and calling `navigator.openWindow(...)`, ensuring persisted windows and tabs are hydrated first.
+2. **Reattaching vs. closing windows:** `BrowserActivity.onDestroy()` detaches the `Activity`'s `taskId` (`navigator.detachWindowTask(windowId, taskId)`) without removing the window from `WindowsKey`. Unattached windows remain available to reattach on the next launch or via the window switcher, and are only removed when explicitly closed.
+
+> [!NOTE]
+> **Known library limitation (detecting initial restore completion):**
+> `syncToDataStore` is a never-ending `suspend` function and does not currently expose a callback when the initial disk restore completes. Opening a window before restore finishes would allow `setState(WindowsKey, decoded)` to overwrite the newly created window (or read partially hydrated window/tab keys). `BrowserApplication.initialRestoreComplete` temporarily works around this with a short startup delay on cold process start until initial restore signaling is added to `androidx.appstate`.

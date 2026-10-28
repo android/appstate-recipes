@@ -25,19 +25,19 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -45,6 +45,8 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.mimeTypes
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.navigation3.runtime.entryProvider
@@ -54,17 +56,25 @@ import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
-import com.example.appstaterecipes.browser.BackStackItem
-import com.example.appstaterecipes.browser.BrowserNavigator
-import com.example.appstaterecipes.browser.BrowserRoute
-import com.example.appstaterecipes.browser.BrowserWindowSession
-import com.example.appstaterecipes.browser.BrowserWindowUiState
-import com.example.appstaterecipes.browser.EntryScrollStateStore
-import com.example.appstaterecipes.browser.TabDragPayload
-import com.example.appstaterecipes.browser.TabSummary
-import com.example.appstaterecipes.browser.WindowSummary
-import com.example.appstaterecipes.browser.rememberBrowserWindowSession
-import com.example.appstaterecipes.browser.rememberEntryScrollState
+import com.example.appstaterecipes.browser.model.BackStackItem
+import com.example.appstaterecipes.browser.model.BrowserRoute
+import com.example.appstaterecipes.browser.state.BrowserNavigator
+import com.example.appstaterecipes.browser.state.BrowserWindowSession
+import com.example.appstaterecipes.browser.state.BrowserWindowUiState
+import com.example.appstaterecipes.browser.state.EntryScrollStateHolder
+import com.example.appstaterecipes.browser.state.TabSummary
+import com.example.appstaterecipes.browser.state.WindowSummary
+import com.example.appstaterecipes.browser.state.rememberBrowserWindowSession
+import com.example.appstaterecipes.browser.state.rememberEntryScrollState
+import com.example.appstaterecipes.browser.ui.dragdrop.TabDragPayload
+import com.example.appstaterecipes.browser.ui.dragdrop.TabDragPreviewMode
+import com.example.appstaterecipes.browser.ui.dragdrop.TabDragShadowController
+import com.example.appstaterecipes.browser.ui.panes.ArticlePane
+import com.example.appstaterecipes.browser.ui.panes.HomePane
+import com.example.appstaterecipes.browser.ui.panes.SearchPane
+import com.example.appstaterecipes.browser.ui.tabbar.BrowserTabBar
+import com.example.appstaterecipes.browser.window.BrowserWindowLauncher
+import com.example.appstaterecipes.ui.excludeBottom
 import com.example.appstaterecipes.ui.theme.AppStateRecipesTheme
 
 // [START browser_window_screen]
@@ -75,54 +85,64 @@ fun BrowserWindowScreen(
     onSwitchWindow: (String) -> Unit,
     onLaunchNewWindow: (String) -> Unit,
     onCloseEmptyWindow: () -> Unit,
-    onOpenStateStoreViewer: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    // [START_EXCLUDE]
+    onOpenStateStoreViewer: (() -> Unit)? = null,
+    // [END_EXCLUDE]
 ) {
     val session = rememberBrowserWindowSession(navigator, windowId)
-    val uiState by session.uiState
+    val currentUiState by session.uiState
 
     // When the last tab in this window is closed or moved into another window,
     // uiState becomes null. Close this Activity task cleanly.
-    LaunchedEffect(windowId, uiState == null) {
-        if (uiState == null) {
+    LaunchedEffect(windowId, currentUiState == null) {
+        if (currentUiState == null) {
             onCloseEmptyWindow()
         }
     }
 
-    val state = uiState ?: return
+    val uiState = currentUiState ?: return
 
+    // [START_EXCLUDE]
     val closingTabBackProgress = rememberTabCloseBackProgress(
-        enabled = state.canPopOut && !state.canGoBack,
-        onCloseTab = { session.closeTab(state.activeTabId) },
+        enabled = uiState.canPopOut && !uiState.canGoBack,
+        onCloseTab = { session.closeTab(uiState.activeTabId) },
     )
+    // [END_EXCLUDE]
 
     BrowserWindowContent(
-        uiState = state,
+        uiState = uiState,
         session = session,
+        // [START_EXCLUDE]
         closingTabBackProgress = closingTabBackProgress,
+        // [END_EXCLUDE]
         onPopOutTab = { tabId ->
             session.popOutTab(tabId)?.let(onLaunchNewWindow)
         },
+        // [START_EXCLUDE]
         onMoveTabToWindow = { sourceWindowId, tabId, targetWindowId ->
             if (targetWindowId == windowId) {
-                val shouldSwitch = session.receiveTabFromWindow(sourceWindowId, tabId)
-                if (shouldSwitch) {
+                val shouldSwitchToTargetWindow = session.receiveTabFromWindow(sourceWindowId, tabId)
+                if (shouldSwitchToTargetWindow) {
                     onSwitchWindow(targetWindowId)
                 }
             } else {
-                val shouldSwitch = navigator.receiveTabFromWindow(sourceWindowId, tabId, targetWindowId)
-                if (sourceWindowId == windowId && shouldSwitch) {
+                val shouldSwitchToTargetWindow = navigator.moveTabToWindow(sourceWindowId, tabId, targetWindowId)
+                if (sourceWindowId == windowId && shouldSwitchToTargetWindow) {
                     onSwitchWindow(targetWindowId)
                 }
             }
         },
+        // [END_EXCLUDE]
         onSwitchWindow = onSwitchWindow,
         onOpenWindowInNewWindow = onLaunchNewWindow,
         onCloseWindow = { targetWindowId ->
             navigator.closeWindow(targetWindowId)
         },
+        // [START_EXCLUDE]
         onOpenStateStoreViewer = onOpenStateStoreViewer,
-        scrollStore = navigator.scrollStore,
+        // [END_EXCLUDE]
+        scrollStateHolder = navigator.scrollStateHolder,
         modifier = modifier,
     )
 }
@@ -134,13 +154,13 @@ fun BrowserWindowScreen(
  * reading the animated progress can be deferred to the Draw phase (`graphicsLayer`).
  *
  * Back-handling precedence across the browser window:
- * 1. `state.canGoBack` (activeBackStack.size > 1): [NavDisplay]'s internal back handler is enabled and pops routes.
- * 2. `!state.canGoBack && state.canPopOut` (tabs.size > 1): This handler is enabled, fades out the
+ * 1. `uiState.canGoBack` (activeBackStack.size > 1): [NavDisplay]'s internal back handler is enabled and pops routes.
+ * 2. `!uiState.canGoBack && uiState.canPopOut` (tabs.size > 1): This handler is enabled, fades out the
  *    active tab during predictive back, and closes the active tab when committed.
- * 3. `!state.canGoBack && !state.canPopOut`: Both handlers are disabled, so [android.window.OnBackInvokedDispatcher]
+ * 3. `!uiState.canGoBack && !uiState.canPopOut`: Both handlers are disabled, so [android.window.OnBackInvokedDispatcher]
  *    runs the system split-screen window-close predictive animation and finishes the Activity.
  *
- * @param enabled Whether tab-close back handling should be active (typically `state.canPopOut && !state.canGoBack`).
+ * @param enabled Whether tab-close back handling should be active (typically `uiState.canPopOut && !uiState.canGoBack`).
  * @param onCloseTab Callback invoked when the predictive back gesture completes.
  * @return Lambda provider for real-time predictive back progress between `0f` and `1f`.
  */
@@ -179,12 +199,18 @@ fun BrowserWindowContent(
     onCloseWindow: (String) -> Unit,
     modifier: Modifier = Modifier,
     onOpenStateStoreViewer: (() -> Unit)? = null,
-    scrollStore: EntryScrollStateStore = remember { EntryScrollStateStore() },
+    scrollStateHolder: EntryScrollStateHolder = remember { EntryScrollStateHolder() },
     closingTabBackProgress: () -> Float = { 0f },
 ) {
     val windowId = uiState.windowId
     val activeTabId = uiState.activeTabId
-    val currentCanPopOut by rememberUpdatedState(uiState.canPopOut)
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val canDragToSplit = remember(context, configuration) {
+        BrowserWindowLauncher.supportsSplitLaunch(context)
+    }
+    val canDragToNewWindow = uiState.canPopOut && canDragToSplit
+    val currentCanDragToNewWindow by rememberUpdatedState(canDragToNewWindow)
     val currentOnPopOutTab by rememberUpdatedState(onPopOutTab)
     val currentOnMoveTabToWindow by rememberUpdatedState(onMoveTabToWindow)
     val contentTargetId = "$windowId:content"
@@ -201,6 +227,8 @@ fun BrowserWindowContent(
                 val sourceWindowId = TabDragShadowController.activeSourceWindowId
                 if (sourceWindowId != null && sourceWindowId != windowId) {
                     TabDragShadowController.onTargetWindowEntered(contentTargetId)
+                } else if (sourceWindowId == windowId) {
+                    TabDragShadowController.onTargetWindowExited(windowId)
                 }
             }
 
@@ -217,7 +245,7 @@ fun BrowserWindowContent(
                 val handled = handleContentAreaTabDrop(
                     payload = payload,
                     windowId = windowId,
-                    canPopOut = currentCanPopOut,
+                    canPopOut = currentCanDragToNewWindow,
                     onPopOutTab = currentOnPopOutTab,
                     onMoveTabToWindow = currentOnMoveTabToWindow,
                 )
@@ -227,25 +255,25 @@ fun BrowserWindowContent(
         }
     }
 
-    val rawCloseProgress = closingTabBackProgress()
+    val liveCloseProgress = closingTabBackProgress()
     val animatedCloseProgress by key(activeTabId) {
         animateFloatAsState(
-            targetValue = rawCloseProgress,
+            targetValue = liveCloseProgress,
             label = "tab_close_predictive_back",
         )
     }
     val effectiveCloseProgress: () -> Float = {
-        val currentRaw = closingTabBackProgress()
-        if (currentRaw > 0f) currentRaw else animatedCloseProgress
+        val currentLiveProgress = closingTabBackProgress()
+        if (currentLiveProgress > 0f) currentLiveProgress else animatedCloseProgress
     }
     val layoutDirection = LocalLayoutDirection.current
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             BrowserTabBar(
                 uiState = uiState,
+                canDragToNewWindow = canDragToNewWindow,
                 closingTabBackProgress = effectiveCloseProgress,
                 onBack = { session.goBack() },
                 onSelectTab = { tabId -> session.selectTab(tabId) },
@@ -261,15 +289,17 @@ fun BrowserWindowContent(
             )
         },
     ) { innerPadding ->
-        val provider = remember(scrollStore, session) {
+        val contentInsets = innerPadding.excludeBottom()
+        // [START browser_nav_display]
+        val provider = remember(scrollStateHolder, session) {
             entryProvider<BackStackItem> {
                 entry<BackStackItem>(
                     clazzContentKey = { it.contentKey },
                 ) { item ->
                     val scrollState = rememberEntryScrollState(
                         entryId = item.entryId,
-                        scrollStore = scrollStore,
-                        isValidEntry = { session.isActiveBackStackEntry(item.entryId) },
+                        scrollStateHolder = scrollStateHolder,
+                        isActiveEntry = { session.isActiveBackStackEntry(item.entryId) },
                     )
                     when (val route = item.route) {
                         is BrowserRoute.Home -> HomePane(
@@ -311,6 +341,7 @@ fun BrowserWindowContent(
             backStack = backStackItems,
             onBack = { session.goBack() },
             entryProvider = provider,
+            // [START_EXCLUDE]
             transitionSpec = {
                 if (isTabSwitch()) {
                     fadeIn() togetherWith fadeOut()
@@ -332,7 +363,7 @@ fun BrowserWindowContent(
                     slideOutHorizontally(targetOffsetX = { (it * 0.3f).toInt() })
             },
             modifier = Modifier
-                .padding(top = innerPadding.calculateTopPadding())
+                .padding(top = contentInsets.calculateTopPadding())
                 .fillMaxSize()
                 .dragAndDropTarget(
                     shouldStartDragAndDrop = { event ->
@@ -341,15 +372,16 @@ fun BrowserWindowContent(
                     target = contentDropTarget,
                 )
                 .padding(
-                    start = innerPadding.calculateStartPadding(layoutDirection),
-                    end = innerPadding.calculateEndPadding(layoutDirection),
-                    bottom = innerPadding.calculateBottomPadding(),
+                    start = contentInsets.calculateStartPadding(layoutDirection),
+                    end = contentInsets.calculateEndPadding(layoutDirection),
                 )
-                .consumeWindowInsets(innerPadding)
+                .consumeWindowInsets(contentInsets)
                 .graphicsLayer {
                     alpha = (1f - effectiveCloseProgress() * 0.85f).coerceIn(0f, 1f)
                 },
+            // [END_EXCLUDE]
         )
+        // [END browser_nav_display]
     }
 }
 
@@ -432,11 +464,11 @@ private fun BrowserWindowContentPreview() {
         activeBackStack = listOf(BrowserRoute.Home),
         allWindows = allWindows,
     )
-    val previewUiState = remember { androidx.compose.runtime.mutableStateOf<BrowserWindowUiState?>(uiState) }
+    val previewUiState = remember { mutableStateOf<BrowserWindowUiState?>(uiState) }
     val fakeSession = remember {
         object : BrowserWindowSession {
             override val windowId: String = "win-preview"
-            override val uiState: androidx.compose.runtime.State<BrowserWindowUiState?> = previewUiState
+            override val uiState: State<BrowserWindowUiState?> = previewUiState
             override fun navigate(route: BrowserRoute) {}
             override fun goBack() {}
             override fun newTab(initialRoute: BrowserRoute): String = "tab-new"
@@ -445,7 +477,6 @@ private fun BrowserWindowContentPreview() {
             override fun moveTab(tabId: String, toIndex: Int) {}
             override fun popOutTab(tabId: String): String? = null
             override fun receiveTabFromWindow(sourceWindowId: String, tabId: String): Boolean = false
-            override fun windowSummaries(): List<WindowSummary> = allWindows
             override fun isActiveBackStackEntry(entryId: String): Boolean = true
         }
     }

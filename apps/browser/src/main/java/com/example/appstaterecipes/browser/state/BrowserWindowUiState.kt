@@ -14,62 +14,11 @@
  * limitations under the License.
  */
 
-package com.example.appstaterecipes.browser
+package com.example.appstaterecipes.browser.state
 
-import androidx.navigation3.runtime.NavKey
-import kotlinx.serialization.Serializable
-
-/**
- * Navigation 3 back-stack key representing an individual entry within a tab's back stack.
- *
- * @property tabId The ID of the tab this back-stack item belongs to.
- * @property index The 0-based depth/position of this entry within the tab's back-stack list
- *                 (0 being the root destination of the tab).
- * @property route The destination [BrowserRoute] displayed by this back-stack entry.
- */
-@Serializable
-data class BackStackItem(
-    val tabId: String,
-    val index: Int,
-    val route: BrowserRoute,
-) : NavKey {
-    /**
-     * Unique strongly-typed identifier for this back-stack entry ([EntryId]), used for
-     * persistent keys such as [EntryScrollOffsetsKey].
-     */
-    val entryId: String get() = EntryId.of(tabId, index).value
-
-    /**
-     * Bundle-saveable content key (`"$entryId:$route"`) for Navigation 3's
-     * `SaveableStateHolderNavEntryDecorator`.
-     */
-    val contentKey: String get() = "$entryId:$route"
-
-    companion object {
-        fun tabIdFromContentKey(contentKey: Any?): String? =
-            (contentKey as? String)?.substringBefore(':', missingDelimiterValue = "")
-                ?.takeIf { it.isNotEmpty() }
-    }
-}
-
-/**
- * State representing a single browser window.
- *
- * @property windowId Unique identifier for this window.
- * @property tabIds Ordered list of tab IDs open within this window. Must contain at least one tab.
- * @property activeTabId The ID of the currently selected tab in [tabIds].
- */
-@Serializable
-data class WindowState(
-    val windowId: String,
-    val tabIds: List<String>,
-    val activeTabId: String,
-) {
-    init {
-        require(tabIds.isNotEmpty()) { "WindowState must have at least one tabId." }
-        require(activeTabId in tabIds) { "activeTabId ($activeTabId) must be in tabIds ($tabIds)." }
-    }
-}
+import androidx.compose.runtime.Immutable
+import com.example.appstaterecipes.browser.model.BackStackItem
+import com.example.appstaterecipes.browser.model.BrowserRoute
 
 /**
  * Summary information for a single tab used by the UI tab bar and switcher.
@@ -79,6 +28,7 @@ data class WindowState(
  * @property stackDepth The number of back-stack entries currently on this tab.
  * @property currentRoute The top-most [BrowserRoute] currently visible in this tab.
  */
+@Immutable
 data class TabSummary(
     val tabId: String,
     val isSelected: Boolean,
@@ -97,6 +47,7 @@ data class TabSummary(
  * @property firstTabTitles The titles of the first few tabs, displayed in the switcher overview.
  * @property isAttachedToActivity Whether this window is currently attached to a live Activity task.
  */
+@Immutable
 data class WindowSummary(
     val windowId: String,
     val displayName: String,
@@ -116,6 +67,7 @@ data class WindowSummary(
  * @property allWindows Summaries of all known windows across the application.
  * @property activeBackStackItems The Navigation 3 [BackStackItem] keys for the active tab's stack.
  */
+@Immutable
 data class BrowserWindowUiState(
     val windowId: String,
     val displayName: String,
@@ -124,10 +76,10 @@ data class BrowserWindowUiState(
     val activeBackStack: List<BrowserRoute>,
     val allWindows: List<WindowSummary>,
 ) {
-    val activeBackStackItems: List<BackStackItem> = activeBackStack.mapIndexed { index, route ->
+    val activeBackStackItems: List<BackStackItem> = activeBackStack.mapIndexed { stackIndex, route ->
         BackStackItem(
             tabId = activeTabId,
-            index = index,
+            stackIndex = stackIndex,
             route = route,
         )
     }

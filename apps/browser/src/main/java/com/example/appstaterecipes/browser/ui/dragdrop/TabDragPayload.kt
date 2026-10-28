@@ -14,38 +14,12 @@
  * limitations under the License.
  */
 
-package com.example.appstaterecipes.browser
+package com.example.appstaterecipes.browser.ui.dragdrop
 
 import android.content.ClipData
 import android.content.IntentSender
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
-
-/**
- * Strongly-typed identifier for a back stack entry formatted as `"$tabId:$stackIndex"`.
- */
-@JvmInline
-value class EntryId(val value: String) {
-    val tabId: String
-        get() = value.substringBeforeLast(':')
-
-    val stackIndex: Int?
-        get() = value.substringAfterLast(':', "").toIntOrNull()
-
-    val isValid: Boolean
-        get() = stackIndex != null && tabId.isNotEmpty()
-
-    companion object {
-        fun of(tabId: String, stackIndex: Int): EntryId = EntryId("$tabId:$stackIndex")
-
-        fun parse(value: String): EntryId? {
-            val separatorIndex = value.lastIndexOf(':')
-            if (separatorIndex <= 0) return null
-            val stackIndex = value.substring(separatorIndex + 1).toIntOrNull() ?: return null
-            return EntryId(value)
-        }
-    }
-}
 
 /**
  * Structured payload transferred during drag-and-drop of a browser tab.
@@ -87,5 +61,23 @@ data class TabDragPayload(
             val rawText = clipData.getItemAt(0).text?.toString() ?: return null
             return parse(rawText)
         }
+
+        /**
+         * Returns `true` only when dragging a tab can delegate an unhandled drop outside all app
+         * windows to the system via `DRAG_FLAG_START_INTENT_SENDER_ON_UNHANDLED_DRAG`.
+         *
+         * Gated to desktop windowing (`isCaptionBarVisible == true`) because on full-screen and
+         * split-screen phones/tablets without a desktop caption bar, attaching an Activity
+         * [IntentSender] activates System UI's `ShellDropTarget` split-screen drop zone across the
+         * top of the display, directly overlapping `BrowserTabBar` and stealing tab drags. In
+         * non-desktop modes, dropping onto the window's content area already pops out a new window
+         * via `BrowserWindowScreen`, and `DRAG_FLAG_GLOBAL_SAME_APPLICATION` handles cross-window
+         * tab moves.
+         */
+        internal fun shouldStartIntentSenderOnUnhandledDrag(
+            canCreateNewWindow: Boolean,
+            sdkInt: Int,
+            isCaptionBarVisible: Boolean,
+        ): Boolean = canCreateNewWindow && sdkInt >= 35 && isCaptionBarVisible
     }
 }

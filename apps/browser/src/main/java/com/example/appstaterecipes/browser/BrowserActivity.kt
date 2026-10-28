@@ -16,14 +16,7 @@
 
 package com.example.appstaterecipes.browser
 
-import android.app.Activity
-import android.app.ActivityOptions
-import android.app.PendingIntent
-import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
-import android.graphics.Rect
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -35,9 +28,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.lifecycleScope
 import com.example.appstaterecipes.StateStoreOwner
-import com.example.appstaterecipes.browser.ui.BrowserDragOutIntentFactory
+import com.example.appstaterecipes.browser.state.BrowserNavigator
 import com.example.appstaterecipes.browser.ui.BrowserWindowScreen
-import com.example.appstaterecipes.browser.ui.LocalBrowserDragOutIntentFactory
+import com.example.appstaterecipes.browser.ui.dragdrop.BrowserDragOutIntentFactory
+import com.example.appstaterecipes.browser.ui.dragdrop.LocalBrowserDragOutIntentFactory
+import com.example.appstaterecipes.browser.window.BrowserWindowLauncher
 import com.example.appstaterecipes.statestoreviewer.StateStoreViewerActivity
 import com.example.appstaterecipes.ui.theme.AppStateRecipesTheme
 import kotlinx.coroutines.launch
@@ -56,10 +51,12 @@ class BrowserActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         lifecycleScope.launch {
-            (application as? BrowserApplication)?.isRestored?.await()
+            // [START_EXCLUDE]
+            (application as? BrowserApplication)?.initialRestoreComplete?.await()
+            // [END_EXCLUDE]
             if (currentWindowId == null) {
                 val requestedWindowId = savedInstanceState?.getString(KEY_SAVED_WINDOW_ID)
-                    ?: resolveWindowIdFromIntent(intent)
+                    ?: BrowserWindowLauncher.resolveWindowIdFromIntent(intent, navigator)
                 currentWindowId = navigator.openWindow(
                     requestedWindowId = requestedWindowId,
                     taskId = taskId,
@@ -68,69 +65,59 @@ class BrowserActivity : ComponentActivity() {
         }
 
         setContent {
+            // [START_EXCLUDE]
+            CompositionLocalProvider(
+                LocalBrowserDragOutIntentFactory provides BrowserDragOutIntentFactory(
+                    BrowserWindowLauncher::createDragOutPendingIntent,
+                ),
+            ) {
+            // [END_EXCLUDE]
             AppStateRecipesTheme {
-                val activeWindowId = currentWindowId ?: return@AppStateRecipesTheme
+                val windowId = currentWindowId ?: return@AppStateRecipesTheme
                 val context = LocalContext.current
-                CompositionLocalProvider(
-                    LocalBrowserDragOutIntentFactory provides BrowserDragOutIntentFactory { ctx, sourceWinId, tabId ->
-                        val dragOutIntent = createDragOutTabIntent(ctx, sourceWinId, tabId)
-                        PendingIntent.getActivity(
-                            ctx,
-                            tabId.hashCode(),
-                            dragOutIntent,
-                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                BrowserWindowScreen(
+                    windowId = windowId,
+                    navigator = navigator,
+                    onSwitchWindow = { targetWindowId ->
+                        switchToWindow(targetWindowId)
+                    },
+                    onLaunchNewWindow = { newWindowId ->
+                        BrowserWindowLauncher.launchBrowserWindow(context, newWindowId)
+                    },
+                    onCloseEmptyWindow = {
+                        finishAndRemoveTask()
+                    },
+                    // [START_EXCLUDE]
+                    onOpenStateStoreViewer = {
+                        startActivity(
+                            Intent(
+                                this@BrowserActivity,
+                                StateStoreViewerActivity::class.java,
+                            ),
                         )
                     },
-                ) {
-                    BrowserWindowScreen(
-                        windowId = activeWindowId,
-                        navigator = navigator,
-                        onSwitchWindow = { targetWindowId ->
-                            switchToWindow(targetWindowId)
-                        },
-                        onLaunchNewWindow = { newWindowId ->
-                            context.launchBrowserWindow(newWindowId)
-                        },
-                        onCloseEmptyWindow = {
-                            finishAndRemoveTask()
-                        },
-                        onOpenStateStoreViewer = {
-                            startActivity(
-                                Intent(
-                                    this@BrowserActivity,
-                                    StateStoreViewerActivity::class.java,
-                                ),
-                            )
-                        },
-                    )
-                }
+                    // [END_EXCLUDE]
+                )
             }
+            // [START_EXCLUDE]
+            }
+            // [END_EXCLUDE]
         }
     }
 
+    // [START_EXCLUDE]
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         lifecycleScope.launch {
-            (application as? BrowserApplication)?.isRestored?.await()
-            val requestedWindowId = resolveWindowIdFromIntent(intent)
+            (application as? BrowserApplication)?.initialRestoreComplete?.await()
+            val requestedWindowId = BrowserWindowLauncher.resolveWindowIdFromIntent(intent, navigator)
             if (requestedWindowId != null && requestedWindowId != currentWindowId) {
                 switchToWindow(requestedWindowId)
             }
         }
     }
-
-    private fun resolveWindowIdFromIntent(intent: Intent): String? {
-        intent.getStringExtra(EXTRA_WINDOW_ID)?.let { return it }
-        val dragSourceWindowId = intent.getStringExtra(EXTRA_SOURCE_WINDOW_ID)
-        val dragTabId = intent.getStringExtra(EXTRA_DRAG_OUT_TAB_ID)
-        if (dragSourceWindowId != null && dragTabId != null) {
-            intent.removeExtra(EXTRA_SOURCE_WINDOW_ID)
-            intent.removeExtra(EXTRA_DRAG_OUT_TAB_ID)
-            return navigator.popOutTabToNewWindow(dragSourceWindowId, dragTabId)
-        }
-        return null
-    }
+    // [END_EXCLUDE]
 
     private fun switchToWindow(targetWindowId: String) {
         val previousWindowId = currentWindowId
@@ -150,87 +137,15 @@ class BrowserActivity : ComponentActivity() {
         // Detach this Activity's task so the window and its tabs remain preserved in StateStore
         // (and DataStore) and can be reattached when re-entering BrowserActivity or via the
         // window switcher menu. Explicit window deletion happens via closeWindow / closeTab.
-        currentWindowId?.let { windowId ->
-            navigator.detachWindowTask(windowId, taskId)
+        if (!isChangingConfigurations) {
+            currentWindowId?.let { windowId ->
+                navigator.detachWindowTask(windowId, taskId)
+            }
         }
     }
 
     companion object {
-        private const val EXTRA_WINDOW_ID = "extra_window_id"
-        private const val EXTRA_SOURCE_WINDOW_ID = "extra_source_window_id"
-        private const val EXTRA_DRAG_OUT_TAB_ID = "extra_drag_out_tab_id"
         private const val KEY_SAVED_WINDOW_ID = "key_saved_window_id"
-
-        fun createBrowserWindowIntent(context: Context, windowId: String): Intent {
-            return Intent(context, BrowserActivity::class.java).apply {
-                putExtra(EXTRA_WINDOW_ID, windowId)
-                addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_DOCUMENT or
-                        Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                        Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
-                )
-            }
-        }
-
-        fun createDragOutTabIntent(context: Context, sourceWindowId: String, tabId: String): Intent {
-            return Intent(context, BrowserActivity::class.java).apply {
-                putExtra(EXTRA_SOURCE_WINDOW_ID, sourceWindowId)
-                putExtra(EXTRA_DRAG_OUT_TAB_ID, tabId)
-                addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_DOCUMENT or
-                        Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                        Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
-                )
-            }
-        }
-
-        fun Context.launchBrowserWindow(windowId: String) {
-            val intent = createBrowserWindowIntent(this, windowId)
-            val options = createMatchingWindowBoundsOptions()
-            if (options != null) {
-                startActivity(intent, options)
-            } else {
-                startActivity(intent)
-            }
-        }
-
-        private fun Context.createMatchingWindowBoundsOptions(): Bundle? {
-            val activity = findActivity() ?: return null
-            val currentBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                Rect(activity.windowManager.currentWindowMetrics.bounds)
-            } else {
-                val rect = Rect()
-                activity.window.decorView.getWindowVisibleDisplayFrame(rect)
-                rect
-            }
-            if (currentBounds.isEmpty) return null
-
-            val maxBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                activity.windowManager.maximumWindowMetrics.bounds
-            } else {
-                null
-            }
-
-            // In freeform / desktop windowing, offset slightly so the new window cascades
-            // visibly while keeping the exact same width and height as the current window.
-            val launchBounds = Rect(currentBounds)
-            if (maxBounds != null && currentBounds != maxBounds) {
-                val offsetPx = (24 * resources.displayMetrics.density).toInt()
-                val dx = offsetPx.coerceAtMost((maxBounds.right - currentBounds.right).coerceAtLeast(0))
-                val dy = offsetPx.coerceAtMost((maxBounds.bottom - currentBounds.bottom).coerceAtLeast(0))
-                launchBounds.offset(dx, dy)
-            }
-
-            return ActivityOptions.makeBasic()
-                .setLaunchBounds(launchBounds)
-                .toBundle()
-        }
-
-        private tailrec fun Context.findActivity(): Activity? = when (this) {
-            is Activity -> this
-            is ContextWrapper -> baseContext.findActivity()
-            else -> null
-        }
     }
 }
 // [END browser_activity]

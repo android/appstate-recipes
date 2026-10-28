@@ -47,9 +47,9 @@ data class StateStoreEntryUiState(
 data class StateStoreViewerUiState(
     val entries: List<StateStoreEntryUiState> = emptyList(),
 ) {
-    val totalKeys: Int get() = entries.size
-    val persistedKeysCount: Int get() = entries.count { it.isPersistedToDataStore }
-    val autoClearKeysCount: Int get() = entries.count { it.autoClearKeyName != null }
+    val totalKeyCount: Int get() = entries.size
+    val persistedKeyCount: Int get() = entries.count { it.isPersistedToDataStore }
+    val autoClearKeyCount: Int get() = entries.count { it.autoClearKeyName != null }
 }
 
 /**
@@ -74,22 +74,22 @@ fun rememberStateStoreViewerUiState(stateStore: StateStore): State<StateStoreVie
 private fun StateStoreKey<*>.toEntryUiState(stateStore: StateStore): StateStoreEntryUiState {
     @Suppress("UNCHECKED_CAST")
     val currentValue = stateStore.getState(this as StateStoreKey<Any?>).value
-    val defaultVal = this.defaultValue
-    val keySimpleName = this::class.simpleName ?: this.toString()
-    val keyQualifiedName = this::class.qualifiedName
-    val typeName = currentValue?.let { it::class.simpleName }
-        ?: defaultVal?.let { it::class.simpleName }
+    val defaultValue = this.defaultValue
+    val keyName = this::class.simpleName ?: this.toString()
+    val qualifiedKeyName = this::class.qualifiedName
+    val valueTypeName = currentValue?.let { it::class.simpleName }
+        ?: defaultValue?.let { it::class.simpleName }
         ?: "Any?"
 
     return StateStoreEntryUiState(
-        keyName = keySimpleName,
-        qualifiedKeyName = keyQualifiedName,
-        valueTypeName = typeName,
+        keyName = keyName,
+        qualifiedKeyName = qualifiedKeyName,
+        valueTypeName = valueTypeName,
         isPersistedToDataStore = this is PersistToDataStore,
         autoClearKeyName = autoClearKey?.let { it::class.simpleName ?: it.toString() },
-        isDefaultValue = currentValue == defaultVal,
+        isDefaultValue = currentValue == defaultValue,
         formattedValue = formatStateValue(currentValue),
-        formattedDefaultValue = formatStateValue(defaultVal),
+        formattedDefaultValue = formatStateValue(defaultValue),
     )
 }
 
@@ -113,11 +113,11 @@ internal fun formatStateValue(value: Any?, indentLevel: Int = 0): String {
                 buildString {
                     appendLine("{")
                     val entries = value.entries.toList()
-                    entries.forEachIndexed { index, (k, v) ->
-                        val formattedKey = formatStateValue(k, indentLevel = 0)
-                        val formattedVal = formatStateValue(v, indentLevel = indentLevel + 1)
+                    entries.forEachIndexed { index, (mapKey, mapValue) ->
+                        val formattedKey = formatStateValue(mapKey, indentLevel = 0)
+                        val formattedValue = formatStateValue(mapValue, indentLevel = indentLevel + 1)
                         val suffix = if (index < entries.lastIndex) "," else ""
-                        append("$childIndent$formattedKey: $formattedVal$suffix")
+                        append("$childIndent$formattedKey: $formattedValue$suffix")
                         if (index < entries.lastIndex) appendLine()
                     }
                     appendLine()
