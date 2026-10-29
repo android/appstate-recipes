@@ -40,3 +40,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AppStateRecipes"
 include(":app")
+include(":githubbrowser")
