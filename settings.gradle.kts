@@ -35,9 +35,18 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("https://androidx.dev/snapshots/builds/16707163/artifacts/repository")
+            content {
+                includeGroupByRegex("androidx\\.appstate.*")
+                includeGroupByRegex("androidx\\.datastore.*")
+            }
+        }
     }
 }
 
 rootProject.name = "AppStateRecipes"
+include(":core")
 include(":app")
+include(":apps:browser")
 include(":githubbrowser")
