@@ -49,3 +49,4 @@ rootProject.name = "AppStateRecipes"
 include(":core")
 include(":app")
 include(":apps:browser")
+include(":githubbrowser")
