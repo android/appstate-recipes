@@ -84,7 +84,13 @@ class AuthStateHolder @Inject constructor(
         stateStore.getState(LoggedInUserLoginKey).value.ifBlank { null }
     }
 
-    /** The signed-in [User] fetched after sign-in, or `null` if not yet loaded or signed out. */
+    /**
+     * The signed-in [User] fetched after sign-in, or `null` if not yet loaded or signed out.
+     *
+     * [LoggedInUserKey] uses `autoClearKey`, so [StateStore] removes its entry when the login is
+     * cleared and creates a new `State` on the next write. Look the key up on every read instead of
+     * caching the `State` returned by [StateStore.getState], which would stop updating.
+     */
     val loggedInUser: State<User?> = derivedStateOf {
         stateStore.getState(LoggedInUserKey).value
     }
@@ -93,9 +99,7 @@ class AuthStateHolder @Inject constructor(
         accessToken.value != null && loggedInUserLogin.value != null
     }
 
-    val loginFlowState: State<LoginFlowState> = derivedStateOf {
-        stateStore.getState(LoginFlowStateKey).value
-    }
+    val loginFlowState: State<LoginFlowState> = stateStore.getState(LoginFlowStateKey)
 
     /**
      * Registers the persisted keys ([AccessTokenKey] and [LoggedInUserLoginKey]) in [StateStore]

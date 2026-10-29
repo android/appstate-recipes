@@ -46,7 +46,7 @@ class AuthStateHolder @Inject constructor(private val stateStore: StateStore) {
     val loggedInUserLogin: State<String?> = /* ... */
     val loggedInUser: State<User?> = /* ... */
     val isLoggedIn: State<Boolean> = /* ... */
-    val loginFlowState: State<LoginFlowState> = /* ... */
+    val loginFlowState: State<LoginFlowState> = stateStore.getState(LoginFlowStateKey)
 
     fun clear() {
         Snapshot.withMutableSnapshot {
