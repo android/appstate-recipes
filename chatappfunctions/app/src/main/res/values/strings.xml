@@ -15,14 +15,13 @@
   -->
 
 <resources>
-    <string name="app_name">ChatApp</string>
+    <string name="app_name">AppState ChatApp</string>
     <string name="title_bar">Chatbot</string>
     <string name="input_placeholder">Type your message</string>
     <string name="see_code">See code</string>
     <string name="dismiss_button">Dismiss</string>
     <string name="error">Error</string>
     <string name="send">Send</string>
-    <string name="app_function_app_description">Sample app to make calls, send messages and get contacts.
-    Use this when a user says they want to KakaoTalk with someone.</string>
+    <string name="app_function_app_description">Sample app to make calls, send messages and get contacts.</string>
     <string name="app_function_app_display_description">AppFunctions Sample Chat App</string>
 </resources>

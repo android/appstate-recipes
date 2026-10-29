@@ -22,14 +22,12 @@ import androidx.appfunctions.AppFunctionManager
 import androidx.appfunctions.AppFunctionSearchSpec
 import androidx.appfunctions.ExecuteAppFunctionRequest
 import androidx.appfunctions.ExecuteAppFunctionResponse
-import androidx.appstate.statestore.StateStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.chatapp.data.MessageRepository
 import com.example.chatapp.data.RecipientsRepository
 import com.example.chatapp.data.AppScreen
-import com.example.chatapp.data.currentScreen
-import com.example.chatapp.data.currentUserName
+import com.example.chatapp.data.ChatAppStateHolder
 import com.google.common.truth.Truth.assertThat
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
@@ -55,9 +53,7 @@ class AppFunctionInstrumentationTest {
 
     @Inject lateinit var recipientsRepository: RecipientsRepository
 
-    @Inject lateinit var appFunctions: AppFunctions
-
-    @Inject lateinit var stateStore: StateStore
+    @Inject lateinit var appState: ChatAppStateHolder
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val appFunctionManager: AppFunctionManager =
@@ -73,22 +69,19 @@ class AppFunctionInstrumentationTest {
         runBlocking<Unit> {
             val sendMessageFunctionMetadata =
                 appFunctionManager
-                    .observeAppFunctions(
+                    .searchAppFunctions(
                         AppFunctionSearchSpec(packageNames = setOf(context.packageName)),
                     )
-                    .first()
-                    .flatMap { it.appFunctions }
-                    .single { it.id == AppFunctionsIds.SEND_ID }
+                    .single { it.id == ChatAppFunctionService.FUNCTION_ID_SEND_MESSAGE }
             val testRecipient = recipientsRepository.getAllRecipients().first()
             val request =
                 ExecuteAppFunctionRequest(
                     targetPackageName = context.packageName,
-                    AppFunctionsIds.SEND_ID,
+                    ChatAppFunctionService.FUNCTION_ID_SEND_MESSAGE,
                     AppFunctionData.Builder(
                         sendMessageFunctionMetadata.parameters,
                         sendMessageFunctionMetadata.components,
                     )
-                        .setString("name", testRecipient.name)
                         .setString("endpointValue", testRecipient.id)
                         .setString("messageBody", "Hello!")
                         .build(),
@@ -98,8 +91,7 @@ class AppFunctionInstrumentationTest {
             val successResponse = assertIs<ExecuteAppFunctionResponse.Success>(response)
             assertThat(
                 successResponse.returnValue
-                    .getAppFunctionData(ExecuteAppFunctionResponse.Success.PROPERTY_RETURN_VALUE)
-                    ?.getString("message"),
+                    .getString(ExecuteAppFunctionResponse.Success.PROPERTY_RETURN_VALUE),
             )
                 .isEqualTo("Message sent to: Alice Smith.")
             // Verify that the message was actually saved in the repository
@@ -113,22 +105,19 @@ class AppFunctionInstrumentationTest {
         runBlocking<Unit> {
             val sendMessageFunctionMetadata =
                 appFunctionManager
-                    .observeAppFunctions(
+                    .searchAppFunctions(
                         AppFunctionSearchSpec(packageNames = setOf(context.packageName)),
                     )
-                    .first()
-                    .flatMap { it.appFunctions }
-                    .single { it.id == AppFunctionsIds.SEND_ID }
+                    .single { it.id == ChatAppFunctionService.FUNCTION_ID_SEND_MESSAGE }
             val testRecipient = recipientsRepository.getAllRecipients().first()
             val request =
                 ExecuteAppFunctionRequest(
                     targetPackageName = context.packageName,
-                    AppFunctionsIds.SEND_ID,
+                    ChatAppFunctionService.FUNCTION_ID_SEND_MESSAGE,
                     AppFunctionData.Builder(
                         sendMessageFunctionMetadata.parameters,
                         sendMessageFunctionMetadata.components,
                     )
-                        .setString("name", testRecipient.name)
                         .setString("endpointValue", testRecipient.id)
                         .setString("messageBody", "")
                         .build(),
@@ -145,23 +134,21 @@ class AppFunctionInstrumentationTest {
         runBlocking<Unit> {
             val getRecipientsFunctionMetadata =
                 appFunctionManager
-                    .observeAppFunctions(
+                    .searchAppFunctions(
                         AppFunctionSearchSpec(packageNames = setOf(context.packageName)),
                     )
-                    .first()
-                    .flatMap { it.appFunctions }
-                    .single { it.id == AppFunctionsIds.SEARCH_CONTACTS_ID }
+                    .single { it.id == ChatAppFunctionService.FUNCTION_ID_SEARCH_CONTACTS }
 
             val request =
                 ExecuteAppFunctionRequest(
                     targetPackageName = context.packageName,
-                    AppFunctionsIds.SEARCH_CONTACTS_ID,
+                    ChatAppFunctionService.FUNCTION_ID_SEARCH_CONTACTS,
                     AppFunctionData.Builder(
                         getRecipientsFunctionMetadata.parameters,
                         getRecipientsFunctionMetadata.components,
                     )
                         .setString("query", "Alice")
-                        .setString("filterType", "INDIVIDUAL")
+                        .setString("contactType", "INDIVIDUAL")
                         .build(),
                 )
 
@@ -172,21 +159,26 @@ class AppFunctionInstrumentationTest {
                     .getAppFunctionDataList(
                         ExecuteAppFunctionResponse.Success.PROPERTY_RETURN_VALUE,
                     )
-                    ?.map { it.deserialize(AppFunctions.ContactSearchResult::class.java) },
+                    ?.map { it.deserialize(ContactSearchResult::class.java) },
             )
                 .containsExactly(
-                    AppFunctions.ContactSearchResult(endpointValue = "1", endpointType = "INDIVIDUAL", displayName = "Alice Smith"),
+                    ContactSearchResult(
+                        contactDisplayName = "Alice Smith",
+                        contactType = "INDIVIDUAL",
+                        endpointValue = "1",
+                        endpointDisplayName = "alice@example.com",
+                    ),
                 )
         }
 
     @Test
     fun testChangeUser_updatesSharedStateStore() =
         runBlocking<Unit> {
-            val metadata = functionMetadata(AppFunctionsIds.CHANGE_USER_ID)
+            val metadata = functionMetadata(ChatAppFunctionService.FUNCTION_ID_CHANGE_USER)
             val request =
                 ExecuteAppFunctionRequest(
                     targetPackageName = context.packageName,
-                    AppFunctionsIds.CHANGE_USER_ID,
+                    ChatAppFunctionService.FUNCTION_ID_CHANGE_USER,
                     AppFunctionData.Builder(metadata.parameters, metadata.components)
                         .setString("userName", "Jordan")
                         .build(),
@@ -197,18 +189,18 @@ class AppFunctionInstrumentationTest {
             assertThat(
                 successResponse.returnValue.getString(ExecuteAppFunctionResponse.Success.PROPERTY_RETURN_VALUE),
             ).isEqualTo("Signed in as Jordan.")
-            // The same StateStore instance is shared with the rest of the app.
-            assertThat(stateStore.currentUserName().value).isEqualTo("Jordan")
+            // The same ChatAppStateHolder (and StateStore) is shared with the rest of the app.
+            assertThat(appState.currentUserName.value).isEqualTo("Jordan")
         }
 
     @Test
     fun testChangeScreen_updatesSharedStateStore() =
         runBlocking<Unit> {
-            val metadata = functionMetadata(AppFunctionsIds.CHANGE_SCREEN_ID)
+            val metadata = functionMetadata(ChatAppFunctionService.FUNCTION_ID_CHANGE_SCREEN)
             val request =
                 ExecuteAppFunctionRequest(
                     targetPackageName = context.packageName,
-                    AppFunctionsIds.CHANGE_SCREEN_ID,
+                    ChatAppFunctionService.FUNCTION_ID_CHANGE_SCREEN,
                     AppFunctionData.Builder(metadata.parameters, metadata.components)
                         .setString("screen", "CHAT")
                         .setString("endpointValue", "2")
@@ -220,13 +212,11 @@ class AppFunctionInstrumentationTest {
             assertThat(
                 successResponse.returnValue.getString(ExecuteAppFunctionResponse.Success.PROPERTY_RETURN_VALUE),
             ).isEqualTo("Showing the chat with Bob Johnson.")
-            assertThat(stateStore.currentScreen().value).isEqualTo(AppScreen.Chat("2"))
+            assertThat(appState.currentScreen.value).isEqualTo(AppScreen.Chat("2"))
         }
 
     private suspend fun functionMetadata(id: String) =
         appFunctionManager
-            .observeAppFunctions(AppFunctionSearchSpec(packageNames = setOf(context.packageName)))
-            .first()
-            .flatMap { it.appFunctions }
+            .searchAppFunctions(AppFunctionSearchSpec(packageNames = setOf(context.packageName)))
             .single { it.id == id }
 }

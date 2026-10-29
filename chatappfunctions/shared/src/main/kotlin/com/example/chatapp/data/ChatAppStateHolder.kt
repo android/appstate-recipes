@@ -17,26 +17,14 @@ package com.example.chatapp.data
 
 import androidx.appstate.statestore.StateStore
 import androidx.appstate.statestore.StateStoreKey
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import javax.inject.Inject
 import javax.inject.Singleton
-
-/*
- * Application-level state shared between the AppFunctions service and the UI.
- *
- * Both run in the app process and receive the same singleton [StateStore] from Hilt, so a change
- * made by an agent through an AppFunction (such as `changeScreen` or `changeUser`) is immediately
- * visible to the activity, and the activity reports what the user is doing back through it.
- */
-
-/** Display name of the user of the app. Used as the sender name of outgoing messages. */
-object CurrentUserNameKey : StateStoreKey<String>(DEFAULT_USER_NAME)
-
-/** The screen the app is showing. Kept in sync with navigation by `MainActivity`. */
-object CurrentScreenKey : StateStoreKey<AppScreen>(AppScreen.ChatList)
 
 /** A screen of the app. */
 sealed interface AppScreen {
@@ -55,16 +43,40 @@ sealed interface AppScreen {
 
 const val DEFAULT_USER_NAME = "Me"
 
-fun StateStore.currentUserName(): State<String> = getState(CurrentUserNameKey)
+/** Display name of the user of the app. Used as the sender name of outgoing messages. */
+private object CurrentUserNameKey : StateStoreKey<String>(DEFAULT_USER_NAME)
 
-fun StateStore.setCurrentUserName(name: String) {
-    setState(CurrentUserNameKey, name)
-}
+/** The screen the app is showing. Kept in sync with navigation by `MainActivity`. */
+private object CurrentScreenKey : StateStoreKey<AppScreen>(AppScreen.ChatList)
 
-fun StateStore.currentScreen(): State<AppScreen> = getState(CurrentScreenKey)
+/**
+ * Application-level state shared between the AppFunctions service and the UI.
+ *
+ * Both run in the app process and receive this singleton from Hilt, so a change made by an agent
+ * through an AppFunction (such as `changeScreen` or `changeUser`) is immediately visible to the
+ * activity, and the activity reports what the user is doing back through it.
+ *
+ * The state lives in the shared [StateStore] under `private` keys, so it can only be read or
+ * changed through this class.
+ */
+@Stable
+@Singleton
+class ChatAppStateHolder @Inject constructor(
+    private val stateStore: StateStore,
+) {
+    /** The display name of the user of the app. */
+    val currentUserName: State<String> = stateStore.getState(CurrentUserNameKey)
 
-fun StateStore.setCurrentScreen(screen: AppScreen) {
-    setState(CurrentScreenKey, screen)
+    /** The screen the app is showing. */
+    val currentScreen: State<AppScreen> = stateStore.getState(CurrentScreenKey)
+
+    fun setCurrentUserName(name: String) {
+        stateStore.setState(CurrentUserNameKey, name)
+    }
+
+    fun setCurrentScreen(screen: AppScreen) {
+        stateStore.setState(CurrentScreenKey, screen)
+    }
 }
 
 /** Provides the single [StateStore] shared by the whole application. */

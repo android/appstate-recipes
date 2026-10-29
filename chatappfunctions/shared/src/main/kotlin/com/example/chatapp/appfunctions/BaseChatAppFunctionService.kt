@@ -1,0 +1,434 @@
+/*
+ * Copyright 2026 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.example.chatapp.appfunctions
+
+import android.app.PendingIntent
+import android.content.Intent
+import android.net.Uri
+import androidx.annotation.RequiresApi
+import androidx.appfunctions.AppFunctionAppUnknownException
+import androidx.appfunctions.AppFunctionDeclaration
+import androidx.appfunctions.AppFunctionElementNotFoundException
+import androidx.appfunctions.AppFunctionInvalidArgumentException
+import androidx.appfunctions.AppFunctionService
+import androidx.appfunctions.AppFunctionServiceEntryPoint
+import androidx.appfunctions.AppFunctionStringValueConstraint
+import androidx.appfunctions.AppFunctionTextResource
+import androidx.appfunctions.ExperimentalAppFunctionsApi
+import com.example.chatapp.data.AppScreen
+import com.example.chatapp.data.ChatAppStateHolder
+import com.example.chatapp.data.CallManager
+import com.example.chatapp.data.DisplayMessage
+import com.example.chatapp.data.MessageRepository
+import com.example.chatapp.data.RecipientsRepository
+import com.example.chatapp.data.WallpaperRepository
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import org.json.JSONArray
+import org.json.JSONObject
+import javax.inject.Inject
+
+/**
+ * Service entry point for chat-related AppFunctions such as searching contacts, sending messages, and making calls.
+ */
+@RequiresApi(36)
+@AndroidEntryPoint
+@AppFunctionServiceEntryPoint(
+    serviceName = "ChatAppFunctionService",
+    appFunctionXmlFileName = "chat_app_function_service",
+)
+abstract class BaseChatAppFunctionService : AppFunctionService() {
+    @Inject lateinit var messageRepository: MessageRepository
+
+    @Inject lateinit var recipientsRepository: RecipientsRepository
+
+    @Inject lateinit var callManager: CallManager
+
+    @Inject lateinit var wallpaperRepository: WallpaperRepository
+
+    @Inject lateinit var appState: ChatAppStateHolder
+
+    /**
+     * Search for message recipients or chat groups by name or email.
+     * Required workflow: Call this before "send" or "makeCall" to obtain a valid endpointValue (unique ID).
+     *
+     * @param query Search string for contact name, email, or group name. Throws [AppFunctionInvalidArgumentException] if empty.
+     * @param contactType Filter results by entity type. Accepts "INDIVIDUAL", "GROUP", or "ANY".
+     * @return List of [ContactSearchResult] objects matching the query.
+     * @throws AppFunctionInvalidArgumentException If query is empty or blank, an invalid contactType is provided, or if no matching contact or group is found. If thrown, suggest the user clarify the recipient or group name.
+     */
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
+    suspend fun searchContacts(
+        query: String,
+        @AppFunctionStringValueConstraint(enumValues = ["INDIVIDUAL", "GROUP", "ANY"])
+        contactType: String,
+    ): List<ContactSearchResult> {
+        if (query.isBlank()) {
+            throw AppFunctionInvalidArgumentException("Query cannot be empty")
+        }
+        val recipients =
+            when (contactType) {
+                "INDIVIDUAL" -> {
+                    recipientsRepository.searchRecipients(query, 3)
+                }
+                "GROUP" -> {
+                    recipientsRepository.searchGroups(query, 3).map {
+                        ContactSearchResult(
+                            contactDisplayName = it.name,
+                            contactType = "GROUP",
+                            endpointValue = it.id,
+                            endpointDisplayName = it.name,
+                        )
+                    }
+                }
+                "ANY" -> {
+                    recipientsRepository.searchAny(query, maxCount = 3)
+                }
+                else -> {
+                    throw AppFunctionInvalidArgumentException(
+                        "Invalid contactType: $contactType. Must be INDIVIDUAL, GROUP, or ANY.",
+                    )
+                }
+            }
+
+        if (recipients.isEmpty()) {
+            throw AppFunctionInvalidArgumentException(
+                "$contactType with name $query not found. Ask the user to clarify the name",
+            )
+        }
+        return recipients
+    }
+
+    /**
+     * Fetch details for sending a message before execution.
+     * Required workflow: Call "searchContacts" first to obtain a valid endpointValue.
+     *
+     * @param endpointValue The unique identifier for the recipient or group obtained from searchContacts.
+     * @param messageBody The text content of the message to send. Cannot be empty or blank.
+     * @param imageUris Optional list of image URIs to attach to the message.
+     * @return A [ConfirmationPreview] object containing confirmation details.
+     * @throws AppFunctionInvalidArgumentException If messageBody is empty or blank. If thrown, ask the user to provide the message content to send.
+     * @throws AppFunctionElementNotFoundException If no contact or group matches endpointValue. If thrown, call "searchContacts" to find the correct ID.
+     */
+    @OptIn(ExperimentalAppFunctionsApi::class)
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
+    suspend fun fetchSendMessageDetails(
+        endpointValue: String,
+        messageBody: String,
+        imageUris: List<Uri>? = null,
+    ): ConfirmationPreview {
+        if (messageBody.isBlank()) {
+            throw AppFunctionInvalidArgumentException("Message body cannot be empty")
+        }
+        val displayName =
+            recipientsRepository.getRecipientById(endpointValue)?.name
+                ?: recipientsRepository.getGroupById(endpointValue)?.name
+                ?: throw AppFunctionElementNotFoundException(
+                    "No contact or group found for endpointValue: $endpointValue",
+                )
+
+        val surfaceId = "surface_$endpointValue"
+        val catalogId =
+            "https://developers.google.com/connected-apps/a2ui/v0_9/comms_catalog_preview.json"
+
+        val createSurface =
+            JSONObject().apply {
+                put("version", "v0.9")
+                put(
+                    "createSurface",
+                    JSONObject().apply {
+                        put("surfaceId", surfaceId)
+                        put("catalogId", catalogId)
+                    },
+                )
+            }
+
+        val confirmationComponent =
+            JSONObject().apply {
+                put("component", "MessageConfirmationComponent")
+                put("id", "root")
+                put("contactDisplayName", displayName)
+                put("endpointDisplayName", "ChatApp")
+                put("messageBody", messageBody)
+                put("editMessageUri", buildEditMessageUri(endpointValue, messageBody))
+            }
+
+        val updateComponents =
+            JSONObject().apply {
+                put("version", "v0.9")
+                put(
+                    "updateComponents",
+                    JSONObject().apply {
+                        put("surfaceId", surfaceId)
+                        put("components", JSONArray().put(confirmationComponent).toString())
+                    },
+                )
+            }
+
+        val a2uiJsonPayload =
+            JSONArray().apply {
+                put(createSurface)
+                put(updateComponents)
+            }.toString()
+
+        val a2uiResource =
+            AppFunctionTextResource(
+                mimeType = "application/a2ui+json",
+                content = a2uiJsonPayload,
+            )
+
+        return ConfirmationPreview(resources = listOf(a2uiResource))
+    }
+
+    /**
+     * Send a text message with optional image attachments to an individual contact or group.
+     * Required workflow: Call "searchContacts" first to obtain a valid endpointValue.
+     *
+     * @param endpointValue The unique identifier for the recipient or group obtained from searchContacts.
+     * @param messageBody The text content of the message to send. Cannot be empty or blank.
+     * @param imageUris Optional list of image URIs to attach to the message.
+     * @return A human-readable message indicating the error or confirmation.
+     * @throws AppFunctionInvalidArgumentException If messageBody is empty or blank. If thrown, ask the user to provide the message content to send.
+     * @throws AppFunctionElementNotFoundException If no contact or group matches endpointValue. If thrown, call "searchContacts" to find the correct ID.
+     * @throws AppFunctionAppUnknownException If sending fails due to a repository error. If thrown, suggest the user retry later.
+     */
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
+    suspend fun sendMessage(
+        endpointValue: String,
+        messageBody: String,
+        imageUris: List<Uri>? = null,
+    ): String {
+        if (messageBody.isBlank()) {
+            throw AppFunctionInvalidArgumentException("Message body cannot be empty")
+        }
+        val displayName =
+            recipientsRepository.getRecipientById(endpointValue)?.name
+                ?: recipientsRepository.getGroupById(endpointValue)?.name
+                ?: throw AppFunctionElementNotFoundException(
+                    "No contact or group found for endpointValue: $endpointValue",
+                )
+
+        try {
+            messageRepository.send(
+                text = messageBody,
+                recipientIds = listOf(endpointValue),
+                imageUris = imageUris?.map { it.toString() },
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw AppFunctionAppUnknownException("Failed to send message: ${e.message}")
+        }
+
+        return "Message sent to: $displayName."
+    }
+
+    /**
+     * Initiate a voice call with an individual contact or group.
+     * Required workflow: Call "searchContacts" first to obtain a valid endpointValue.
+     *
+     * @param endpointValue The unique identifier for the recipient or group obtained from searchContacts.
+     * @return A [PendingIntent] that launches the call activity in the application UI.
+     * @throws AppFunctionElementNotFoundException If no recipient exists for endpointValue. If thrown, call "searchContacts" to find the correct ID.
+     */
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
+    suspend fun makeCall(endpointValue: String): PendingIntent {
+        val recipient =
+            recipientsRepository.getRecipientById(endpointValue)
+                ?: throw AppFunctionElementNotFoundException(
+                    "No recipient exists for endpointValue: $endpointValue",
+                )
+
+        callManager.startCall(recipient.id)
+
+        return PendingIntent.getActivity(
+            this,
+            0,
+            Intent().setClassName(this, "com.example.chatapp.MainActivity")
+                .apply { putExtra("nav_route", "call/${recipient.id}") },
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /**
+     * Updates the wallpaper image for a specific chat conversation.
+     *
+     * @param chatId The unique identifier for the recipient or chat group.
+     * @param wallpaperUri The URI of the image file to set as the chat wallpaper.
+     */
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
+    suspend fun updateChatWallpaper(
+        chatId: String,
+        wallpaperUri: Uri,
+    ): Boolean {
+        val resolvedId =
+            recipientsRepository.getRecipientById(chatId)?.id
+                ?: recipientsRepository.getGroupById(chatId)?.id
+                ?: recipientsRepository.searchAny(chatId, maxCount = 1).firstOrNull()?.endpointValue
+                ?: chatId
+        val inputStream =
+            try {
+                contentResolver.openInputStream(wallpaperUri)
+            } catch (e: Exception) {
+                throw AppFunctionInvalidArgumentException("Cannot open wallpaper stream: ${e.message}")
+            } ?: throw AppFunctionInvalidArgumentException("Cannot open wallpaper stream")
+        return inputStream.use { stream ->
+            wallpaperRepository.setWallpaper(resolvedId, stream)
+        }
+    }
+
+    /**
+     * Search for messages containing a query string, optionally filtered by a specific recipient.
+     *
+     * @param query The text to search for within message bodies. Cannot be empty.
+     * @param endpointValue Optional unique identifier of the contact or group to restrict the search to.
+     * @return List of [MessagesSearchResult] matching the query.
+     * @throws AppFunctionInvalidArgumentException If the query is blank.
+     */
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
+    suspend fun searchMessages(
+        query: String,
+        endpointValue: String? = null,
+    ): List<MessagesSearchResult> {
+        if (query.isBlank()) {
+            throw AppFunctionInvalidArgumentException("Query cannot be empty")
+        }
+        val targetIds =
+            if (endpointValue != null) {
+                listOf(endpointValue)
+            } else {
+                val individuals = recipientsRepository.getAllRecipients().map { it.id }
+                val groups = recipientsRepository.getAllGroups().map { it.id }
+                individuals + groups
+            }
+
+        val results = mutableListOf<MessagesSearchResult>()
+
+        for (id in targetIds) {
+            val messages = messageRepository.getMessages(id).first()
+            val matchingMessages =
+                messages.filter { it.content.contains(query, ignoreCase = true) }
+            if (matchingMessages.isNotEmpty()) {
+                results.add(
+                    MessagesSearchResult(
+                        endpointValue = id,
+                        messages =
+                            matchingMessages.map {
+                                val senderDisplayName = getSenderDisplayName(it, id)
+                                Message(
+                                    messageBody = it.content,
+                                    timestamp = it.sentAt,
+                                    senderDisplayName = senderDisplayName,
+                                )
+                            },
+                    ),
+                )
+            }
+        }
+
+        return results
+    }
+
+    /**
+     * Change the user signed in to the chat app.
+     *
+     * @param userName The display name of the user to switch to. It is shown on the chat list and
+     *   used as the sender name of the messages the user sends. Cannot be blank.
+     * @return A confirmation message.
+     * @throws AppFunctionInvalidArgumentException If userName is blank.
+     */
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
+    suspend fun changeUser(userName: String): String {
+        if (userName.isBlank()) {
+            throw AppFunctionInvalidArgumentException("userName cannot be blank.")
+        }
+        appState.setCurrentUserName(userName.trim())
+        return "Signed in as ${userName.trim()}."
+    }
+
+    /**
+     * Change the screen shown in the chat app.
+     *
+     * @param screen The screen to show: "CHAT_LIST" for the list of all conversations, "CHAT" for a
+     *   single conversation (requires endpointValue), or "SETTINGS" for the app's settings. If the
+     *   app is open, it navigates there right away. To start a call, use "makeCall" instead.
+     * @param endpointValue The unique identifier of the contact or group whose conversation to
+     *   show, as returned by "searchContacts". Required when screen is "CHAT".
+     * @return A confirmation message.
+     * @throws AppFunctionInvalidArgumentException If screen is invalid, or endpointValue is missing
+     *   when screen is "CHAT".
+     * @throws AppFunctionElementNotFoundException If no contact or group matches endpointValue.
+     */
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
+    suspend fun changeScreen(
+        @AppFunctionStringValueConstraint(enumValues = ["CHAT_LIST", "CHAT", "SETTINGS"])
+        screen: String,
+        endpointValue: String? = null,
+    ): String {
+        val (appScreen, confirmation) =
+            when (screen) {
+                "CHAT_LIST" -> AppScreen.ChatList to "Showing the chat list."
+                "SETTINGS" -> AppScreen.Settings to "Showing settings."
+                "CHAT" -> {
+                    if (endpointValue.isNullOrBlank()) {
+                        throw AppFunctionInvalidArgumentException(
+                            "endpointValue is required when screen is CHAT.",
+                        )
+                    }
+                    val name =
+                        recipientsRepository.getRecipientById(endpointValue)?.name
+                            ?: recipientsRepository.getGroupById(endpointValue)?.name
+                            ?: throw AppFunctionElementNotFoundException(
+                                "No contact or group found for endpointValue: $endpointValue",
+                            )
+                    AppScreen.Chat(endpointValue) to "Showing the chat with $name."
+                }
+                else -> throw AppFunctionInvalidArgumentException(
+                    "screen must be CHAT_LIST, CHAT, or SETTINGS.",
+                )
+            }
+        appState.setCurrentScreen(appScreen)
+        return confirmation
+    }
+
+    private fun buildEditMessageUri(
+        endpointValue: String,
+        messageBody: String,
+    ): String =
+        Uri.Builder()
+            .scheme("app")
+            .authority("com.example.appstaterecipes.chatapp")
+            .appendPath("chat")
+            .appendPath(endpointValue)
+            .appendQueryParameter("draft", messageBody)
+            .build()
+            .toString()
+
+    private fun getSenderDisplayName(
+        message: DisplayMessage,
+        endpointId: String,
+    ): String {
+        return message.senderName
+            ?: if (message.isInbound) {
+                recipientsRepository.getRecipientById(endpointId)?.name
+                    ?: recipientsRepository.getGroupById(endpointId)?.name
+                    ?: "Other"
+            } else {
+                "Me"
+            }
+    }
+}

@@ -19,10 +19,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.appstate.statestore.StateStore
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
@@ -34,8 +36,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.example.chatapp.data.AppScreen
-import com.example.chatapp.data.currentScreen
-import com.example.chatapp.data.setCurrentScreen
+import com.example.chatapp.data.ChatAppStateHolder
 import com.example.chatapp.ui.theme.ChatAppTheme
 import com.example.chatapp.uicomponents.AppFunctionsScreen
 import com.example.chatapp.uicomponents.CallScreen
@@ -47,7 +48,7 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     /** Application-level state shared with the AppFunctions service. */
-    @Inject lateinit var stateStore: StateStore
+    @Inject lateinit var appState: ChatAppStateHolder
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,11 +66,20 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Keep the shared StateStore and navigation in sync: show the screen when it is
+                // Keep the shared app state and navigation in sync: show the screen when it is
                 // changed outside the UI (for example by an agent calling the changeScreen
                 // AppFunction), and report the screen the user navigates to.
-                val currentScreen = stateStore.currentScreen().value
+                val currentScreen = appState.currentScreen.value
+                // If the activity was launched with an explicit destination (a deep link or a
+                // nav_route extra), show that instead of the stored screen on the first sync.
+                val launchedWithDestination = remember {
+                    intent?.data != null || intent?.hasExtra("nav_route") == true
+                }
+                var isFirstSync by remember { mutableStateOf(true) }
                 LaunchedEffect(currentScreen) {
+                    val skip = isFirstSync && launchedWithDestination
+                    isFirstSync = false
+                    if (skip) return@LaunchedEffect
                     val shownScreen = navController.currentBackStackEntry?.toAppScreen()
                     if (shownScreen != null && shownScreen != currentScreen) {
                         navController.show(currentScreen)
@@ -78,13 +88,13 @@ class MainActivity : ComponentActivity() {
                 val currentEntry by navController.currentBackStackEntryAsState()
                 LaunchedEffect(currentEntry) {
                     // Read the live entry: the effect above may have just navigated.
-                    navController.currentBackStackEntry?.toAppScreen()?.let(stateStore::setCurrentScreen)
+                    navController.currentBackStackEntry?.toAppScreen()?.let(appState::setCurrentScreen)
                 }
 
                 NavHost(navController = navController, startDestination = "recipients") {
                     composable(
                         route = "recipients",
-                        deepLinks = listOf(navDeepLink { uriPattern = "app://com.example.chatapp/recipients" }),
+                        deepLinks = listOf(navDeepLink { uriPattern = "app://com.example.appstaterecipes.chatapp/recipients" }),
                     ) {
                         RecipientsScreen(
                             onRecipientClick = { recipientId ->
@@ -97,20 +107,35 @@ class MainActivity : ComponentActivity() {
                     }
                     composable(
                         route = "functions",
-                        deepLinks = listOf(navDeepLink { uriPattern = "app://com.example.chatapp/functions" }),
+                        deepLinks = listOf(navDeepLink { uriPattern = "app://com.example.appstaterecipes.chatapp/functions" }),
                     ) {
                         AppFunctionsScreen(
                             onBackClick = { navController.popBackStack() },
                         )
                     }
                     composable(
-                        route = "chat/{recipientId}",
-                        arguments = listOf(navArgument("recipientId") { type = NavType.StringType }),
-                        deepLinks = listOf(navDeepLink { uriPattern = "app://com.example.chatapp/chat/{recipientId}" }),
+                        route = "chat/{recipientId}?draft={draft}",
+                        arguments =
+                            listOf(
+                                navArgument("recipientId") { type = NavType.StringType },
+                                navArgument("draft") {
+                                    type = NavType.StringType
+                                    nullable = true
+                                    defaultValue = null
+                                },
+                            ),
+                        deepLinks =
+                            listOf(
+                                navDeepLink {
+                                    uriPattern = "app://com.example.appstaterecipes.chatapp/chat/{recipientId}?draft={draft}"
+                                },
+                            ),
                     ) { backStackEntry ->
                         val recipientId = backStackEntry.arguments?.getString("recipientId") ?: "bot"
+                        val draft = backStackEntry.arguments?.getString("draft")
                         ChatScreen(
                             recipientId = recipientId,
+                            initialDraft = draft,
                             onCallClick = { navController.navigate("call/$recipientId") },
                             onBackClick = { navController.popBackStack() },
                         )
@@ -118,7 +143,7 @@ class MainActivity : ComponentActivity() {
                     composable(
                         route = "call/{recipientId}",
                         arguments = listOf(navArgument("recipientId") { type = NavType.StringType }),
-                        deepLinks = listOf(navDeepLink { uriPattern = "app://com.example.chatapp/call/{recipientId}" }),
+                        deepLinks = listOf(navDeepLink { uriPattern = "app://com.example.appstaterecipes.chatapp/call/{recipientId}" }),
                     ) { backStackEntry ->
                         val recipientId = backStackEntry.arguments?.getString("recipientId") ?: "bot"
                         CallScreen(
@@ -137,19 +162,28 @@ private fun NavBackStackEntry.toAppScreen(): AppScreen? {
     return when (destination.route) {
         "recipients" -> AppScreen.ChatList
         "functions" -> AppScreen.Settings
-        "chat/{recipientId}" -> recipientId?.let(AppScreen::Chat)
+        "chat/{recipientId}?draft={draft}" -> recipientId?.let(AppScreen::Chat)
         "call/{recipientId}" -> recipientId?.let(AppScreen::Call)
         else -> null
     }
 }
 
+/**
+ * Shows [screen] on top of the chat list. Other screens are popped first so that repeated
+ * `changeScreen` calls from an agent don't keep stacking destinations on the back stack.
+ */
 private fun NavController.show(screen: AppScreen) {
-    when (screen) {
-        AppScreen.ChatList -> popBackStack(route = "recipients", inclusive = false)
-        AppScreen.Settings -> navigate("functions") { launchSingleTop = true }
-        is AppScreen.Chat -> navigate("chat/${screen.endpointValue}") { launchSingleTop = true }
-        is AppScreen.Call -> navigate("call/${screen.endpointValue}") { launchSingleTop = true }
-    }
+    val route =
+        when (screen) {
+            AppScreen.ChatList -> {
+                popBackStack(route = "recipients", inclusive = false)
+                return
+            }
+            AppScreen.Settings -> "functions"
+            is AppScreen.Chat -> "chat/${screen.endpointValue}"
+            is AppScreen.Call -> "call/${screen.endpointValue}"
+        }
+    navigate(route) { popUpTo("recipients") }
 }
 
 @Preview(showBackground = true)

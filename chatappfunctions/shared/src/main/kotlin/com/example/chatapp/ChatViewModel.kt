@@ -16,15 +16,15 @@
 package com.example.chatapp
 
 import android.net.Uri
-import androidx.appstate.statestore.StateStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.chatapp.appfunctions.AppFunctions.Recipient
+import com.example.chatapp.appfunctions.Recipient
 import com.example.chatapp.data.CallManager
 import com.example.chatapp.data.DisplayMessage
 import com.example.chatapp.data.MessageRepository
 import com.example.chatapp.data.RecipientsRepository
-import com.example.chatapp.data.currentUserName
+import com.example.chatapp.data.WallpaperRepository
+import com.example.chatapp.data.ChatAppStateHolder
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -66,6 +66,8 @@ data class ChatbotUiState(
     val messages: List<DisplayMessage> = listOf(),
     /** The current state of the bot's response generation. */
     val botMessageState: BotMessageState = BotMessageState.WaitingForMessage,
+    /** Optional path to a custom wallpaper image for this chat. */
+    val wallpaperPath: String? = null,
 )
 
 @HiltViewModel(assistedFactory = ChatViewModel.Factory::class)
@@ -76,7 +78,8 @@ class ChatViewModel
         private val messageRepository: MessageRepository,
         private val callManager: CallManager,
         private val recipientsRepository: RecipientsRepository,
-        private val stateStore: StateStore,
+        private val wallpaperRepository: WallpaperRepository,
+        private val appState: ChatAppStateHolder,
     ) : ViewModel() {
         @AssistedFactory
         interface Factory {
@@ -88,7 +91,6 @@ class ChatViewModel
                 ?: recipientsRepository.getGroupById(recipientId)?.let {
                     Recipient(it.id, it.name, "")
                 }
-                ?: recipientsRepository.getRecipientByName(recipientId)
                 ?: if (recipientId == "bot") {
                     Recipient("bot", "Assistant", "bot@example.com")
                 } else {
@@ -104,6 +106,11 @@ class ChatViewModel
             viewModelScope.launch {
                 messageRepository.getMessages(recipientId).collect { msgs ->
                     _uiState.update { it.copy(messages = msgs) }
+                }
+            }
+            viewModelScope.launch {
+                wallpaperRepository.getWallpaper(recipientId).collect { path ->
+                    _uiState.update { it.copy(wallpaperPath = path) }
                 }
             }
         }
@@ -122,7 +129,7 @@ class ChatViewModel
                         content = "📞 Call ended",
                         sentAt = System.currentTimeMillis(),
                         isInbound = false,
-                        senderName = stateStore.currentUserName().value,
+                        senderName = appState.currentUserName.value,
                     )
                 messageRepository.saveMessage(activeRecipient.id, callLogMessage)
             }
@@ -140,7 +147,7 @@ class ChatViewModel
                         DisplayMessage(
                             content = message,
                             sentAt = System.currentTimeMillis(),
-                            senderName = stateStore.currentUserName().value,
+                            senderName = appState.currentUserName.value,
                             images = images,
                         )
                     messageRepository.saveMessage(recipientId, userMessage)

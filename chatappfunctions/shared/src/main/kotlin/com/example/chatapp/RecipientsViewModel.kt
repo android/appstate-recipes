@@ -15,15 +15,14 @@
  */
 package com.example.chatapp
 
-import androidx.appstate.statestore.StateStore
 import androidx.compose.runtime.State
 import androidx.lifecycle.ViewModel
-import com.example.chatapp.appfunctions.AppFunctions.ChatGroup
-import com.example.chatapp.appfunctions.AppFunctions.Recipient
+import com.example.chatapp.appfunctions.ChatGroup
+import com.example.chatapp.appfunctions.Recipient
 import com.example.chatapp.data.DisplayMessage
 import com.example.chatapp.data.MessageRepository
 import com.example.chatapp.data.RecipientsRepository
-import com.example.chatapp.data.currentUserName
+import com.example.chatapp.data.ChatAppStateHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -35,10 +34,10 @@ class RecipientsViewModel
     constructor(
         private val recipientsRepository: RecipientsRepository,
         private val messageRepository: MessageRepository,
-        stateStore: StateStore,
+        appState: ChatAppStateHolder,
     ) : ViewModel() {
-        /** The user's display name, shared with the AppFunctions service through the [StateStore]. */
-        val currentUserName: State<String> = stateStore.currentUserName()
+        /** The user's display name, shared with the AppFunctions service through [ChatAppStateHolder]. */
+        val currentUserName: State<String> = appState.currentUserName
 
         val recipients: List<Recipient> = recipientsRepository.getAllRecipients()
         val groups: List<ChatGroup> = recipientsRepository.getAllGroups()

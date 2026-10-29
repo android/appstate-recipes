@@ -28,7 +28,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.chatapp"
+        applicationId = "com.example.appstaterecipes.chatapp"
         minSdk = 24
         targetSdk = 37
         versionCode = 1
@@ -76,7 +76,6 @@ dependencies {
 
     // AppFunctions
     implementation(libs.androidx.appfunctions)
-    implementation(libs.androidx.appfunctions.service)
     ksp(libs.androidx.appfunctions.compiler)
 
     testImplementation(libs.junit)

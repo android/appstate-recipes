@@ -15,9 +15,9 @@
  */
 package com.example.chatapp.data
 
-import com.example.chatapp.appfunctions.AppFunctions.ChatGroup
-import com.example.chatapp.appfunctions.AppFunctions.ContactSearchResult
-import com.example.chatapp.appfunctions.AppFunctions.Recipient
+import com.example.chatapp.appfunctions.ChatGroup
+import com.example.chatapp.appfunctions.ContactSearchResult
+import com.example.chatapp.appfunctions.Recipient
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,6 +39,7 @@ class RecipientsRepository
                 Recipient(id = "4", name = "David Wilson", email = "david@example.com"),
                 Recipient(id = "5", name = "Eve Davis", email = "eve@example.com"),
                 Recipient(id = "6", name = "Frank Miller", email = "frank@example.com"),
+                Recipient(id = "7", name = "Bob Johnson", email = "bob2@example.com"),
             )
 
         private val groups =
@@ -86,18 +87,34 @@ class RecipientsRepository
         fun searchRecipients(
             query: String?,
             maxCount: Int,
-        ): List<Recipient> {
-            if (query.isNullOrBlank()) {
-                // TODO:Return most recently contacted.
-                return recipients.take(maxCount)
-            }
+        ): List<ContactSearchResult> {
+            val matched =
+                if (query.isNullOrBlank()) {
+                    recipients
+                } else {
+                    recipients.filter {
+                        it.name.contains(query, ignoreCase = true) ||
+                            it.email.contains(
+                                query,
+                                ignoreCase = true,
+                            )
+                    }
+                }
 
-            return recipients.filter {
-                it.name.contains(query, ignoreCase = true) ||
-                    it.email.contains(
-                        query,
-                        ignoreCase = true,
+            val mapped =
+                matched.map {
+                    ContactSearchResult(
+                        contactDisplayName = it.name,
+                        contactType = "INDIVIDUAL",
+                        endpointValue = it.id,
+                        endpointDisplayName = it.email,
                     )
+                }
+
+            return if (query.isNullOrBlank()) {
+                mapped.take(maxCount)
+            } else {
+                mapped
             }
         }
 
@@ -131,24 +148,19 @@ class RecipientsRepository
          * @param maxCount Maximum number of results to return per entity type.
          * @return A unified list of [ContactSearchResult] containing both individuals and groups.
          */
+
         fun searchAny(
             query: String?,
             maxCount: Int,
         ): List<ContactSearchResult> {
-            val individuals =
-                searchRecipients(query, maxCount).map {
-                    ContactSearchResult(
-                        endpointValue = it.id,
-                        endpointType = "INDIVIDUAL",
-                        displayName = it.name,
-                    )
-                }
+            val individuals = searchRecipients(query, maxCount)
             val groups =
                 searchGroups(query, maxCount).map {
                     ContactSearchResult(
+                        contactDisplayName = it.name,
+                        contactType = "GROUP",
                         endpointValue = it.id,
-                        endpointType = "GROUP",
-                        displayName = it.name,
+                        endpointDisplayName = it.name,
                     )
                 }
             return mutableListOf<ContactSearchResult>().apply {
@@ -159,7 +171,7 @@ class RecipientsRepository
 
         fun getRecipientById(id: String): Recipient? = recipients.singleOrNull { it.id == id }
 
-        fun getRecipientByName(name: String): Recipient? = recipients.singleOrNull { it.name == name }
+        fun getRecipientByName(name: String): List<Recipient> = recipients.filter { it.name == name }
 
         fun getGroupById(id: String): ChatGroup? = groups.singleOrNull { it.id == id }
     }

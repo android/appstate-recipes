@@ -15,7 +15,7 @@
  */
 package com.example.chatapp.data
 
-import com.example.chatapp.appfunctions.AppFunctions.Recipient
+import com.example.chatapp.appfunctions.Recipient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,7 +41,6 @@ class CallManager
                     ?: recipientsRepository.getGroupById(recipientId)?.let {
                         Recipient(it.id, it.name, "")
                     }
-                    ?: recipientsRepository.getRecipientByName(recipientId)
                     ?: Recipient(recipientId, recipientId, "")
             startCall(recipient)
         }

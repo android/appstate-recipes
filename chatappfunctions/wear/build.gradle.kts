@@ -29,9 +29,9 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.chatapp.wear"
-        minSdk = 30
-        targetSdk = 35
+        applicationId = "com.example.appstaterecipes.chatapp.wear"
+        minSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0"
     }
@@ -59,6 +59,7 @@ dependencies {
 
     implementation(libs.androidx.wear.compose.material3)
     implementation(libs.androidx.wear.compose.foundation)
+    implementation(libs.androidx.wear.compose.navigation3)
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
@@ -71,7 +72,6 @@ dependencies {
 
     // AppFunctions
     implementation(libs.androidx.appfunctions)
-    implementation(libs.androidx.appfunctions.service)
     ksp(libs.androidx.appfunctions.compiler)
 }
 
