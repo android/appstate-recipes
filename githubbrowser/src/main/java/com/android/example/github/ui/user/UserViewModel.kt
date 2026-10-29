@@ -26,9 +26,9 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.example.github.repository.AuthRepository
+import com.android.example.github.repository.AuthStateHolder
 import com.android.example.github.repository.RepoRepository
 import com.android.example.github.repository.UserRepository
-import com.android.example.github.repository.loggedInUserLogin
 import com.android.example.github.vo.Repo
 import com.android.example.github.vo.Resource
 import com.android.example.github.vo.User
@@ -42,19 +42,19 @@ class UserViewModel @Inject constructor(
     userRepository: UserRepository,
     repoRepository: RepoRepository,
     private val authRepository: AuthRepository,
+    private val authState: AuthStateHolder,
     private val dispatcher: CoroutineDispatcher
 ) : ViewModel() {
-    private val stateStore = authRepository.stateStore
 
     private val _login = mutableStateOf<String?>(null)
     val login: State<String?> = _login
     private val retryTrigger = mutableIntStateOf(0)
 
-    val loggedInUserLogin: State<String?> = authRepository.loggedInUserLogin
+    val loggedInUserLogin: State<String?> = authState.loggedInUserLogin
 
     val isCurrentUser: State<Boolean> = derivedStateOf {
         val currentLogin = _login.value
-        !currentLogin.isNullOrBlank() && currentLogin == stateStore.loggedInUserLogin().value
+        !currentLogin.isNullOrBlank() && currentLogin == authState.loggedInUserLogin.value
     }
 
     val user: State<Resource<User>?> = loadForLogin(userRepository::loadUser)
@@ -81,7 +81,7 @@ class UserViewModel @Inject constructor(
         transform(initialValue = null, scope = viewModelScope, dispatcher = dispatcher) {
             val currentLogin = _login.value
             val trigger = retryTrigger.intValue
-            val activeLogin = stateStore.loggedInUserLogin().value
+            val activeLogin = authState.loggedInUserLogin.value
             if (currentLogin == null) {
                 null
             } else {

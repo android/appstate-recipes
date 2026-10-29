@@ -16,9 +16,6 @@
 
 package com.android.example.github.repository
 
-import androidx.appstate.statestore.StateStore
-import androidx.compose.runtime.State
-import androidx.compose.runtime.derivedStateOf
 import com.android.example.github.AppExecutors
 import com.android.example.github.BuildConfig
 import com.android.example.github.api.ApiErrorResponse
@@ -41,16 +38,8 @@ class AuthRepository @Inject constructor(
     private val githubAuthService: GithubAuthService,
     private val githubService: GithubService,
     private val userDao: UserDao,
-    val stateStore: StateStore
+    private val authState: AuthStateHolder
 ) {
-    val loggedInUserLogin: State<String?> = derivedStateOf {
-        stateStore.loggedInUserLogin().value.ifBlank { null }
-    }
-
-    val isLoggedIn: State<Boolean> = derivedStateOf {
-        stateStore.accessToken().value.isNotBlank() &&
-            stateStore.loggedInUserLogin().value.isNotBlank()
-    }
 
     suspend fun requestDeviceCode(
         clientId: String = BuildConfig.GITHUB_CLIENT_ID
@@ -81,7 +70,7 @@ class AuthRepository @Inject constructor(
             }
 
             if (!tokenResponse.accessToken.isNullOrBlank()) {
-                stateStore.setAccessToken(tokenResponse.accessToken)
+                authState.setAccessToken(tokenResponse.accessToken)
                 return fetchAndSaveAuthenticatedUser()
             }
 
@@ -110,26 +99,25 @@ class AuthRepository @Inject constructor(
                     appExecutors.diskIO.execute {
                         userDao.insert(user)
                     }
-                    stateStore.setLoggedInUserLogin(user.login)
-                    stateStore.setLoggedInUser(user)
+                    authState.setLoggedInUser(user)
                     Result.success(user)
                 }
                 is ApiErrorResponse -> {
-                    stateStore.clearAuthState()
+                    authState.clear()
                     Result.failure(IllegalStateException(apiResponse.errorMessage))
                 }
                 else -> {
-                    stateStore.clearAuthState()
+                    authState.clear()
                     Result.failure(IllegalStateException("Empty user response from GitHub"))
                 }
             }
         } catch (e: Exception) {
-            stateStore.clearAuthState()
+            authState.clear()
             Result.failure(e)
         }
     }
 
     fun logout() {
-        stateStore.clearAuthState()
+        authState.clear()
     }
 }

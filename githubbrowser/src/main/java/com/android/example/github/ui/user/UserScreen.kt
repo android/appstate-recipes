@@ -61,7 +61,7 @@ fun UserScreen(
     onBack: () -> Unit,
     onRepoClick: (owner: String, name: String) -> Unit,
     modifier: Modifier = Modifier,
-    userViewModel: UserViewModel = hiltViewModel(key = login)
+    userViewModel: UserViewModel = hiltViewModel()
 ) {
     LaunchedEffect(login) {
         userViewModel.setLogin(login)

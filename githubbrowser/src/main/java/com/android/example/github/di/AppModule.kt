@@ -25,8 +25,6 @@ import com.android.example.github.api.GithubService
 import com.android.example.github.db.GithubDb
 import com.android.example.github.db.RepoDao
 import com.android.example.github.db.UserDao
-import com.android.example.github.repository.accessToken
-import com.android.example.github.repository.loggedInUserLogin
 import com.android.example.github.util.FlowCallAdapterFactory
 import dagger.Module
 import dagger.Provides
@@ -47,13 +45,7 @@ object AppModule {
 
     @Singleton
     @Provides
-    fun provideStateStore(): StateStore {
-        return StateStore().apply {
-            // Register persisted keys so syncToDataStore restores them on startup
-            accessToken()
-            loggedInUserLogin()
-        }
-    }
+    fun provideStateStore(): StateStore = StateStore()
 
     @Singleton
     @Provides

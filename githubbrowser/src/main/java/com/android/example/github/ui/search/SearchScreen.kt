@@ -77,6 +77,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.android.example.github.repository.LoginFlowState
 import com.android.example.github.ui.common.LoadingRetryState
 import com.android.example.github.ui.common.RepoItem
 
@@ -119,7 +120,7 @@ fun SearchScreen(
         topBar = {
             Column {
                 TopAppBar(
-                    title = { Text("Github") },
+                    title = { Text("GitHub") },
                     actions = {
                         Box {
                             IconButton(onClick = { menuExpanded = true }) {
@@ -326,7 +327,7 @@ fun SearchScreen(
         }
     }
 
-    if (loginState !is LoginUiState.Idle) {
+    if (loginState !is LoginFlowState.Idle) {
         DeviceFlowLoginDialog(
             state = loginState,
             onRetry = { searchViewModel.startLogin() },
@@ -337,7 +338,7 @@ fun SearchScreen(
 
 @Composable
 private fun DeviceFlowLoginDialog(
-    state: LoginUiState,
+    state: LoginFlowState,
     onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -348,7 +349,7 @@ private fun DeviceFlowLoginDialog(
         title = { Text("GitHub Login") },
         text = {
             when (state) {
-                is LoginUiState.RequestingCode -> {
+                is LoginFlowState.RequestingCode -> {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -358,7 +359,7 @@ private fun DeviceFlowLoginDialog(
                         Text("Requesting verification code...")
                     }
                 }
-                is LoginUiState.AwaitingAuthorization -> {
+                is LoginFlowState.AwaitingAuthorization -> {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -411,18 +412,18 @@ private fun DeviceFlowLoginDialog(
                         }
                     }
                 }
-                is LoginUiState.Error -> {
+                is LoginFlowState.Error -> {
                     Text(
                         text = state.message,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
-                is LoginUiState.Idle -> {}
+                is LoginFlowState.Idle -> {}
             }
         },
         confirmButton = {
-            if (state is LoginUiState.Error) {
+            if (state is LoginFlowState.Error) {
                 TextButton(onClick = onRetry) {
                     Text("Retry")
                 }

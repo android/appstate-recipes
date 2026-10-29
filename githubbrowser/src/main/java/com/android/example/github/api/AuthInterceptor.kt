@@ -16,8 +16,7 @@
 
 package com.android.example.github.api
 
-import androidx.appstate.statestore.StateStore
-import com.android.example.github.repository.accessToken
+import com.android.example.github.repository.AuthStateHolder
 import okhttp3.Interceptor
 import okhttp3.Response
 import javax.inject.Inject
@@ -25,13 +24,13 @@ import javax.inject.Singleton
 
 @Singleton
 class AuthInterceptor @Inject constructor(
-    private val stateStore: StateStore
+    private val authState: AuthStateHolder
 ) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
-        val token = stateStore.accessToken().value
-        val request = if (token.isNotBlank()) {
+        val token = authState.accessToken.value
+        val request = if (token != null) {
             original.newBuilder()
                 .header("Authorization", "Bearer $token")
                 .build()

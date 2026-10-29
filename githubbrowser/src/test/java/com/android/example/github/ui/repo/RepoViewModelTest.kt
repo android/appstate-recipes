@@ -17,6 +17,7 @@
 package com.android.example.github.ui.repo
 
 import androidx.appstate.statestore.StateStore
+import com.android.example.github.repository.AuthStateHolder
 import com.google.common.truth.Truth.assertThat
 import com.android.example.github.util.FakeRepoRepository
 import com.android.example.github.util.MainDispatcherRule
@@ -41,7 +42,11 @@ class RepoViewModelTest {
 
     @Before
     fun init() {
-        repoViewModel = RepoViewModel(repository, StateStore(), mainDispatcherRule.testDispatcher)
+        repoViewModel = RepoViewModel(
+            repository,
+            AuthStateHolder(StateStore()),
+            mainDispatcherRule.testDispatcher
+        )
     }
 
     @Test

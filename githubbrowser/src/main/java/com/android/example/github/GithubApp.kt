@@ -19,6 +19,7 @@ package com.android.example.github
 import android.app.Application
 import androidx.appstate.datastore.syncToDataStore
 import androidx.appstate.statestore.StateStore
+import com.android.example.github.repository.AuthStateHolder
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +34,11 @@ class GithubApp : Application() {
     @Inject
     lateinit var stateStore: StateStore
 
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    @Inject
+    lateinit var authState: AuthStateHolder
+
+    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val dataStoreScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -41,10 +46,15 @@ class GithubApp : Application() {
             Timber.plant(Timber.DebugTree())
         }
 
-        applicationScope.launch {
+        // Register the persisted auth keys so syncToDataStore restores them from disk.
+        authState.primeKeys()
+
+        // Launching on Dispatchers.Main runs syncToDataStore's snapshot listener on the main
+        // thread, while dataStoreScope (Dispatchers.IO) is passed to DataStore for file I/O.
+        mainScope.launch {
             try {
                 val path = filesDir.resolve("github_auth_statestore.json").absolutePath
-                stateStore.syncToDataStore(path, this)
+                stateStore.syncToDataStore(path, dataStoreScope)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to sync StateStore with DataStore")
             }

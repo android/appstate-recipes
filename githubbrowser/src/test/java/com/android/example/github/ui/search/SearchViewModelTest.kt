@@ -21,10 +21,8 @@ import com.google.common.truth.Truth.assertThat
 import com.android.example.github.api.ApiResponse
 import com.android.example.github.api.GithubService
 import com.android.example.github.repository.AuthRepository
-import com.android.example.github.repository.accessToken
-import com.android.example.github.repository.loggedInUser
-import com.android.example.github.repository.loggedInUserLogin
-import com.android.example.github.repository.loginUiState
+import com.android.example.github.repository.AuthStateHolder
+import com.android.example.github.repository.LoginFlowState
 import com.android.example.github.ui.repo.RepoViewModel
 import com.android.example.github.ui.user.UserViewModel
 import com.android.example.github.util.ApiUtil
@@ -62,7 +60,7 @@ class SearchViewModelTest {
     private val repository = FakeRepoRepository()
     private val userRepository = FakeUserRepository()
     private val authService = FakeGithubAuthService()
-    private val stateStore = StateStore()
+    private val authState = AuthStateHolder(StateStore())
     private val userDao = FakeUserDao()
     private val octocatUser = TestUtil.createUser("octocat")
     private val authenticatedUserFlow: Flow<ApiResponse<User>> = ApiUtil.successCall(octocatUser)
@@ -88,12 +86,13 @@ class SearchViewModelTest {
             githubAuthService = authService,
             githubService = githubService,
             userDao = userDao,
-            stateStore = stateStore
+            authState = authState
         )
         viewModel = SearchViewModel(
             repoRepository = repository,
             dispatcher = mainDispatcherRule.testDispatcher,
             authRepository = authRepository,
+            authState = authState,
             userRepository = userRepository
         )
     }
@@ -219,12 +218,12 @@ class SearchViewModelTest {
 
         assertThat(viewModel.loggedInUserLogin.value).isNull()
         assertThat(viewModel.loggedInUser.value).isNull()
-        assertThat(viewModel.loginState.value).isEqualTo(LoginUiState.Idle)
+        assertThat(viewModel.loginState.value).isEqualTo(LoginFlowState.Idle)
 
         viewModel.startLogin()
         mainDispatcherRule.advance()
         assertThat(viewModel.loginState.value).isEqualTo(
-            LoginUiState.AwaitingAuthorization(
+            LoginFlowState.AwaitingAuthorization(
                 userCode = "ABCD-1234",
                 verificationUri = "https://github.com/login/device"
             )
@@ -233,21 +232,21 @@ class SearchViewModelTest {
         advanceTimeBy(1500L)
         mainDispatcherRule.advance()
 
-        assertThat(viewModel.loginState.value).isEqualTo(LoginUiState.Idle)
-        assertThat(stateStore.loginUiState().value).isEqualTo(LoginUiState.Idle)
+        assertThat(viewModel.loginState.value).isEqualTo(LoginFlowState.Idle)
+        assertThat(authState.loginFlowState.value).isEqualTo(LoginFlowState.Idle)
         assertThat(viewModel.loggedInUserLogin.value).isEqualTo("octocat")
-        assertThat(stateStore.loggedInUserLogin().value).isEqualTo("octocat")
-        assertThat(stateStore.accessToken().value).isEqualTo("gho_test_token")
+        assertThat(authState.loggedInUserLogin.value).isEqualTo("octocat")
+        assertThat(authState.accessToken.value).isEqualTo("gho_test_token")
         assertThat(viewModel.loggedInUser.value).isEqualTo(octocatUser)
-        assertThat(stateStore.loggedInUser().value).isEqualTo(octocatUser)
+        assertThat(authState.loggedInUser.value).isEqualTo(octocatUser)
 
         viewModel.logout()
         mainDispatcherRule.advance()
         assertThat(viewModel.loggedInUserLogin.value).isNull()
         assertThat(viewModel.loggedInUser.value).isNull()
-        assertThat(stateStore.loggedInUserLogin().value).isEmpty()
-        assertThat(stateStore.accessToken().value).isEmpty()
-        assertThat(stateStore.loggedInUser().value).isNull()
+        assertThat(authState.loggedInUserLogin.value).isNull()
+        assertThat(authState.accessToken.value).isNull()
+        assertThat(authState.loggedInUser.value).isNull()
     }
 
     @Test
@@ -257,12 +256,13 @@ class SearchViewModelTest {
             userRepository = userRepository,
             repoRepository = repository,
             dispatcher = mainDispatcherRule.testDispatcher,
-            authRepository = authRepository
+            authRepository = authRepository,
+            authState = authState
         )
         val repoViewModel = RepoViewModel(
             repository = repository,
             dispatcher = mainDispatcherRule.testDispatcher,
-            stateStore = stateStore
+            authState = authState
         )
 
         userViewModel.setLogin("octocat")
@@ -299,6 +299,6 @@ class SearchViewModelTest {
         assertThat(userViewModel.loggedInUserLogin.value).isNull()
         assertThat(viewModel.loggedInUserLogin.value).isNull()
         assertThat(viewModel.loggedInUser.value).isNull()
-        assertThat(authRepository.isLoggedIn.value).isFalse()
+        assertThat(authState.isLoggedIn.value).isFalse()
     }
 }

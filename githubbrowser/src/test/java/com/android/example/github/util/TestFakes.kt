@@ -27,6 +27,7 @@ import com.android.example.github.db.RepoDao
 import com.android.example.github.db.UserDao
 import androidx.appstate.statestore.StateStore
 import com.android.example.github.repository.AuthRepository
+import com.android.example.github.repository.AuthStateHolder
 import com.android.example.github.repository.RepoRepository
 import com.android.example.github.repository.UserRepository
 import com.android.example.github.vo.Contributor
@@ -82,12 +83,12 @@ val dummyGithubService: GithubService = Proxy.newProxyInstance(
     arrayOf(GithubService::class.java)
 ) { _, _, _ -> emptyFlow<Any>() } as GithubService
 
-fun fakeAuthRepository(stateStore: StateStore = StateStore()) = AuthRepository(
+fun fakeAuthRepository(authState: AuthStateHolder = AuthStateHolder(StateStore())) = AuthRepository(
     appExecutors = InstantAppExecutors(),
     githubAuthService = FakeGithubAuthService(),
     githubService = dummyGithubService,
     userDao = FakeUserDao(),
-    stateStore = stateStore
+    authState = authState
 )
 
 class FakeGithubAuthService : GithubAuthService {

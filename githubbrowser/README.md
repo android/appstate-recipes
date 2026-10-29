@@ -8,7 +8,7 @@ and lets you sign in with your GitHub account.
 
 It shows how the AppState libraries fit into a real, multi-screen app:
 - **`StateStore`** holds the **authentication state** (access token, signed-in login, signed-in user,
-  and login UI state) in one place, shared by the network layer, repositories, and every screen.
+  and sign-in progress) in one place, shared by the network layer, repositories, and every screen.
   With `statestore-datastore`, the token and login persist across app restarts.
 - **`Transform`** handles **state management throughout the app**. Each `ViewModel` exposes its UI
   state as Compose `State` produced by `transform { ... }` instead of `StateFlow` pipelines.
@@ -17,25 +17,47 @@ It shows how the AppState libraries fit into a real, multi-screen app:
 
 ## StateStore for authentication
 
-### Keys and accessors
-[`AuthState.kt`](src/main/java/com/android/example/github/repository/AuthState.kt) defines a
-type-safe `StateStoreKey` for each piece of authentication state, plus `StateStore` extension
-functions to read and write them:
+### A state holder with private keys
+[`AuthStateHolder`](src/main/java/com/android/example/github/repository/AuthStateHolder.kt) wraps
+the shared `StateStore` and declares a `private` `StateStoreKey` for each piece of authentication
+state. Callers read `State` properties on the holder instead of reaching into the `StateStore`, so
+the keys can't be read or written from anywhere else:
 
 ```kotlin
 @Serializable
-object AccessTokenKey : StateStoreKey<String>(""), PersistToDataStore
+private object AccessTokenKey : StateStoreKey<String>(""), PersistToDataStore
 
 @Serializable
-object LoggedInUserLoginKey : StateStoreKey<String>(""), PersistToDataStore
+private object LoggedInUserLoginKey : StateStoreKey<String>(""), PersistToDataStore
 
-object LoggedInUserKey : StateStoreKey<User?>(
+private object LoggedInUserKey : StateStoreKey<User?>(
     defaultValue = null,
     autoClearKey = LoggedInUserLoginKey,
-    shouldClearState = { stateStore -> stateStore.loggedInUserLogin().value.isBlank() }
+    shouldClearState = { stateStore -> stateStore.getState(LoggedInUserLoginKey).value.isBlank() }
 )
 
-object LoginUiStateKey : StateStoreKey<LoginUiState>(LoginUiState.Idle)
+private object LoginFlowStateKey : StateStoreKey<LoginFlowState>(LoginFlowState.Idle)
+
+@Singleton
+class AuthStateHolder @Inject constructor(private val stateStore: StateStore) {
+    val accessToken: State<String?> = derivedStateOf {
+        stateStore.getState(AccessTokenKey).value.ifBlank { null }
+    }
+    val loggedInUserLogin: State<String?> = /* ... */
+    val loggedInUser: State<User?> = /* ... */
+    val isLoggedIn: State<Boolean> = /* ... */
+    val loginFlowState: State<LoginFlowState> = /* ... */
+
+    fun clear() {
+        Snapshot.withMutableSnapshot {
+            stateStore.setState(AccessTokenKey, "")
+            stateStore.setState(LoggedInUserLoginKey, "")
+            stateStore.setState(LoggedInUserKey, null)
+            stateStore.setState(LoginFlowStateKey, LoginFlowState.Idle)
+        }
+    }
+    // ...
+}
 ```
 
 - `AccessTokenKey` and `LoggedInUserLoginKey` implement `PersistToDataStore`, so they are saved to
@@ -43,7 +65,16 @@ object LoginUiStateKey : StateStoreKey<LoginUiState>(LoginUiState.Idle)
   logging out is persisted too.
 - `LoggedInUserKey` uses `autoClearKey` so the cached `User` is cleared automatically when the
   signed-in login is cleared.
-- `LoginUiStateKey` holds the progress of the device-flow login dialog (not persisted).
+- `LoginFlowStateKey` holds the progress of the GitHub device-flow sign-in (not persisted).
+- Updates that touch several keys (`setLoggedInUser`, `clear`) run inside
+  `Snapshot.withMutableSnapshot`, so readers never see a half-updated state.
+
+> [!WARNING]
+> `PersistToDataStore` writes values to disk as plain, unencrypted JSON. This sample persists the
+> access token that way to keep things simple, but production apps should encrypt auth tokens
+> before persisting them (for example, with a key stored in the
+> [Android Keystore](https://developer.android.com/privacy-and-security/keystore) and
+> [Tink](https://developers.google.com/tink)).
 
 ### One shared `StateStore`
 [`AppModule`](src/main/java/com/android/example/github/di/AppModule.kt) provides a single
@@ -52,23 +83,36 @@ object LoginUiStateKey : StateStoreKey<LoginUiState>(LoginUiState.Idle)
 when the app starts:
 
 ```kotlin
-applicationScope.launch {
-    stateStore.syncToDataStore(filesDir.resolve("github_auth_statestore.json").absolutePath, this)
+private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+private val dataStoreScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+override fun onCreate() {
+    super.onCreate()
+    authState.primeKeys()
+    mainScope.launch {
+        stateStore.syncToDataStore(
+            filesDir.resolve("github_auth_statestore.json").absolutePath,
+            dataStoreScope
+        )
+    }
 }
 ```
 
-Persisted keys are read once in `provideStateStore()` so they are registered before
-`syncToDataStore` runs, and their values are restored at startup.
+- `authState.primeKeys()` registers the persisted keys before `syncToDataStore` runs, so their
+  values are restored at startup.
+- `syncToDataStore` is launched on `Dispatchers.Main` so its snapshot listener runs on the main
+  thread, while `dataStoreScope` (`Dispatchers.IO`) is passed to DataStore so file reads and
+  writes stay off the main thread.
 
 ### Every component reads the same state
 Because the authentication state lives in one `StateStore` instead of being copied into each
 class, changes show up everywhere without extra plumbing:
 
-| Component | How it uses the `StateStore` |
+| Component | How it uses `AuthStateHolder` |
 |---|---|
-| [`AuthRepository`](src/main/java/com/android/example/github/repository/AuthRepository.kt) | Writes the token and user after the [GitHub device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow) succeeds, and clears them on logout or failure. Exposes `isLoggedIn` and `loggedInUserLogin`. |
-| [`AuthInterceptor`](src/main/java/com/android/example/github/api/AuthInterceptor.kt) | Reads `stateStore.accessToken().value` on every request to add the `Authorization` header. |
-| [`SearchViewModel`](src/main/java/com/android/example/github/ui/search/SearchViewModel.kt) | Drives the login dialog through `LoginUiStateKey` and shows the signed-in user. |
+| [`AuthRepository`](src/main/java/com/android/example/github/repository/AuthRepository.kt) | Writes the token and user after the [GitHub device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow) succeeds, and clears them on logout or failure. |
+| [`AuthInterceptor`](src/main/java/com/android/example/github/api/AuthInterceptor.kt) | Reads `authState.accessToken.value` on every request to add the `Authorization` header. |
+| [`SearchViewModel`](src/main/java/com/android/example/github/ui/search/SearchViewModel.kt) | Drives the login dialog through `loginFlowState` and shows the signed-in user. |
 | [`UserViewModel`](src/main/java/com/android/example/github/ui/user/UserViewModel.kt) | Shows a **Logout** action when you view your own profile. Logging out here also updates the search screen. |
 | [`RepoViewModel`](src/main/java/com/android/example/github/ui/repo/RepoViewModel.kt) | Reloads repository data when the signed-in user changes, so requests use the new credentials. |
 
@@ -88,7 +132,7 @@ val results: State<Resource<List<Repo>>?> = transform(
 ) {
     val currentQuery = _query.value
     val trigger = refreshTrigger.intValue
-    val activeLogin = stateStore.loggedInUserLogin().value
+    val activeLogin = authState.loggedInUserLogin.value
     if (currentQuery.isEmpty()) {
         null
     } else {
@@ -114,6 +158,10 @@ A few patterns to note:
 
 `UserViewModel` and `RepoViewModel` share this pattern through small `loadForLogin` /
 `loadForRepo` helpers.
+
+`MainActivity` adds `rememberViewModelStoreNavEntryDecorator()` to `NavDisplay`, so each
+`ViewModel` is scoped to its Navigation 3 back stack entry. When an entry is popped, its
+`ViewModel` is cleared and its `transform` blocks stop running.
 
 ---
 
@@ -144,12 +192,12 @@ github.client.id=<your client id>
 
 The unit tests run on the JVM and pass a test dispatcher into each `ViewModel`. They cover:
 - [`AuthRepositoryTest`](src/test/java/com/android/example/github/repository/AuthRepositoryTest.kt):
-  login, logout, and `StateStore` updates.
+  login, logout, and `AuthStateHolder` updates.
 - [`SearchViewModelTest`](src/test/java/com/android/example/github/ui/search/SearchViewModelTest.kt):
   authentication staying in sync across `SearchViewModel`, `UserViewModel`, and `RepoViewModel`
-  through the shared `StateStore`.
+  through the shared `AuthStateHolder`.
 
 ## Libraries used
 - AppState: `statestore`, `statestore-datastore`, `transform`
 - Hilt with [`androidx.hilt:hilt-lifecycle-viewmodel-compose`](https://developer.android.com/jetpack/androidx/releases/hilt) (`hiltViewModel()`)
-- Navigation 3, Room, Retrofit, Coil
+- Navigation 3 with `lifecycle-viewmodel-navigation3`, Room, Retrofit, Coil

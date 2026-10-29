@@ -25,12 +25,10 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.example.github.repository.AuthRepository
+import com.android.example.github.repository.AuthStateHolder
+import com.android.example.github.repository.LoginFlowState
 import com.android.example.github.repository.RepoRepository
 import com.android.example.github.repository.UserRepository
-import com.android.example.github.repository.loggedInUser
-import com.android.example.github.repository.loggedInUserLogin
-import com.android.example.github.repository.loginUiState
-import com.android.example.github.repository.setLoginUiState
 import com.android.example.github.vo.Repo
 import com.android.example.github.vo.Resource
 import com.android.example.github.vo.Status
@@ -43,24 +41,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-sealed interface LoginUiState {
-    data object Idle : LoginUiState
-    data object RequestingCode : LoginUiState
-    data class AwaitingAuthorization(
-        val userCode: String,
-        val verificationUri: String
-    ) : LoginUiState
-    data class Error(val message: String) : LoginUiState
-}
-
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val repoRepository: RepoRepository,
     private val authRepository: AuthRepository,
+    private val authState: AuthStateHolder,
     private val userRepository: UserRepository,
     private val dispatcher: CoroutineDispatcher
 ) : ViewModel() {
-    private val stateStore = authRepository.stateStore
 
     private val _query = mutableStateOf("")
     val query: State<String> = _query
@@ -73,7 +61,7 @@ class SearchViewModel @Inject constructor(
     ) {
         val currentQuery = _query.value
         val trigger = refreshTrigger.intValue
-        val activeLogin = stateStore.loggedInUserLogin().value
+        val activeLogin = authState.loggedInUserLogin.value
         if (currentQuery.isEmpty()) {
             null
         } else {
@@ -82,24 +70,24 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    val loggedInUserLogin: State<String?> = authRepository.loggedInUserLogin
+    val loggedInUserLogin: State<String?> = authState.loggedInUserLogin
 
     val loggedInUser: State<User?> = transform(
         initialValue = null,
         scope = viewModelScope,
         dispatcher = dispatcher
     ) {
-        val login = stateStore.loggedInUserLogin().value
-        if (login.isBlank()) {
+        val login = authState.loggedInUserLogin.value
+        if (login == null) {
             null
         } else {
             remember(login) { userRepository.loadUser(login) }
                 .collectAsState(initial = null).value?.data
-                ?: stateStore.loggedInUser().value
+                ?: authState.loggedInUser.value
         }
     }
 
-    val loginState: State<LoginUiState> = stateStore.loginUiState()
+    val loginState: State<LoginFlowState> = authState.loginFlowState
     private var loginJob: Job? = null
 
     val nextPageHandler = NextPageHandler(repoRepository, viewModelScope)
@@ -130,29 +118,29 @@ class SearchViewModel @Inject constructor(
 
     fun startLogin() {
         loginJob?.cancel()
-        stateStore.setLoginUiState(LoginUiState.RequestingCode)
+        authState.setLoginFlowState(LoginFlowState.RequestingCode)
         loginJob = viewModelScope.launch(dispatcher) {
             val code = authRepository.requestDeviceCode().getOrElse { error ->
-                stateStore.setLoginUiState(
-                    LoginUiState.Error(error.message ?: "Failed to request device code")
+                authState.setLoginFlowState(
+                    LoginFlowState.Error(error.message ?: "Failed to request device code")
                 )
                 return@launch
             }
-            stateStore.setLoginUiState(
-                LoginUiState.AwaitingAuthorization(code.userCode, code.verificationUri)
+            authState.setLoginFlowState(
+                LoginFlowState.AwaitingAuthorization(code.userCode, code.verificationUri)
             )
             val newState = authRepository.pollForAccessToken(code.deviceCode, code.interval).fold(
-                onSuccess = { LoginUiState.Idle },
-                onFailure = { LoginUiState.Error(it.message ?: "Login failed") }
+                onSuccess = { LoginFlowState.Idle },
+                onFailure = { LoginFlowState.Error(it.message ?: "Login failed") }
             )
-            stateStore.setLoginUiState(newState)
+            authState.setLoginFlowState(newState)
         }
     }
 
     fun cancelLogin() {
         loginJob?.cancel()
         loginJob = null
-        stateStore.setLoginUiState(LoginUiState.Idle)
+        authState.setLoginFlowState(LoginFlowState.Idle)
     }
 
     fun logout() {

@@ -52,7 +52,7 @@ class AuthRepositoryTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     private val userDao = FakeUserDao()
-    private val stateStore = StateStore()
+    private val authState = AuthStateHolder(StateStore())
     private val authService = FakeGithubAuthService()
     private var authenticatedUserFlow: Flow<ApiResponse<User>> =
         ApiUtil.successCall(TestUtil.createUser("octocat"))
@@ -77,7 +77,7 @@ class AuthRepositoryTest {
             githubAuthService = authService,
             githubService = githubService,
             userDao = userDao,
-            stateStore = stateStore
+            authState = authState
         )
     }
 
@@ -107,11 +107,10 @@ class AuthRepositoryTest {
         assertThat(result.isSuccess).isTrue()
         assertThat(result.getOrNull()?.login).isEqualTo("octocat")
         assertThat(authService.polledDeviceCodes).containsExactly("device_123", "device_123")
-        assertThat(stateStore.accessToken().value).isEqualTo("gho_valid_token")
-        assertThat(stateStore.loggedInUserLogin().value).isEqualTo("octocat")
-        assertThat(stateStore.loggedInUser().value?.login).isEqualTo("octocat")
-        assertThat(authRepository.loggedInUserLogin.value).isEqualTo("octocat")
-        assertThat(authRepository.isLoggedIn.value).isTrue()
+        assertThat(authState.accessToken.value).isEqualTo("gho_valid_token")
+        assertThat(authState.loggedInUserLogin.value).isEqualTo("octocat")
+        assertThat(authState.loggedInUser.value?.login).isEqualTo("octocat")
+        assertThat(authState.isLoggedIn.value).isTrue()
         assertThat(userDao.insertedUsers.map { it.login }).containsExactly("octocat")
     }
 
@@ -134,8 +133,8 @@ class AuthRepositoryTest {
 
         assertThat(result.isFailure).isTrue()
         assertThat(result.exceptionOrNull()?.message).isEqualTo("The user cancelled authorization")
-        assertThat(authRepository.isLoggedIn.value).isFalse()
-        assertThat(authRepository.loggedInUserLogin.value).isNull()
+        assertThat(authState.isLoggedIn.value).isFalse()
+        assertThat(authState.loggedInUserLogin.value).isNull()
     }
 
     @Test
@@ -145,14 +144,13 @@ class AuthRepositoryTest {
             intervalSeconds = 1,
             clientId = "test_client_id"
         )
-        assertThat(authRepository.isLoggedIn.value).isTrue()
+        assertThat(authState.isLoggedIn.value).isTrue()
 
         authRepository.logout()
-        assertThat(authRepository.isLoggedIn.value).isFalse()
-        assertThat(authRepository.loggedInUserLogin.value).isNull()
-        assertThat(stateStore.accessToken().value).isEmpty()
-        assertThat(stateStore.loggedInUserLogin().value).isEmpty()
-        assertThat(stateStore.loggedInUser().value).isNull()
+        assertThat(authState.isLoggedIn.value).isFalse()
+        assertThat(authState.accessToken.value).isNull()
+        assertThat(authState.loggedInUserLogin.value).isNull()
+        assertThat(authState.loggedInUser.value).isNull()
     }
 
     @Test
@@ -164,7 +162,7 @@ class AuthRepositoryTest {
 
         try {
             val client = OkHttpClient.Builder()
-                .addInterceptor(AuthInterceptor(stateStore))
+                .addInterceptor(AuthInterceptor(authState))
                 .build()
 
             // Without token
@@ -172,8 +170,8 @@ class AuthRepositoryTest {
             val reqWithoutToken = server.takeRequest()
             assertThat(reqWithoutToken.getHeader("Authorization")).isNull()
 
-            // With token in StateStore
-            stateStore.setAccessToken("gho_secret_123")
+            // With token in AuthStateHolder
+            authState.setAccessToken("gho_secret_123")
             client.newCall(Request.Builder().url(server.url("/user")).build()).execute()
             val reqWithToken = server.takeRequest()
             assertThat(reqWithToken.getHeader("Authorization")).isEqualTo("Bearer gho_secret_123")

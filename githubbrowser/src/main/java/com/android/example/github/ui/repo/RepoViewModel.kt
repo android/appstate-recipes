@@ -16,7 +16,6 @@
 
 package com.android.example.github.ui.repo
 
-import androidx.appstate.statestore.StateStore
 import androidx.appstate.transform.transform
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -25,8 +24,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.android.example.github.repository.AuthStateHolder
 import com.android.example.github.repository.RepoRepository
-import com.android.example.github.repository.loggedInUserLogin
 import com.android.example.github.vo.Contributor
 import com.android.example.github.vo.Repo
 import com.android.example.github.vo.Resource
@@ -38,7 +37,7 @@ import javax.inject.Inject
 @HiltViewModel
 class RepoViewModel @Inject constructor(
     private val repository: RepoRepository,
-    private val stateStore: StateStore,
+    private val authState: AuthStateHolder,
     private val dispatcher: CoroutineDispatcher
 ) : ViewModel() {
 
@@ -67,7 +66,7 @@ class RepoViewModel @Inject constructor(
         transform(initialValue = null, scope = viewModelScope, dispatcher = dispatcher) {
             val currentId = _repoId.value
             val trigger = retryTrigger.intValue
-            val activeLogin = stateStore.loggedInUserLogin().value
+            val activeLogin = authState.loggedInUserLogin.value
             if (currentId == null || currentId.name.isEmpty() || currentId.owner.isEmpty()) {
                 null
             } else {

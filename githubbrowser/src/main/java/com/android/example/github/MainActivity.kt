@@ -19,6 +19,7 @@ package com.android.example.github
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
@@ -48,7 +49,8 @@ class MainActivity : ComponentActivity() {
                 NavDisplay(
                     backStack = backStack,
                     entryDecorators = listOf(
-                        rememberSaveableStateHolderNavEntryDecorator()
+                        rememberSaveableStateHolderNavEntryDecorator(),
+                        rememberViewModelStoreNavEntryDecorator()
                     ),
                     onBack = { if (backStack.size > 1) popBackStack() else finish() },
                     entryProvider = entryProvider {

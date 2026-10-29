@@ -16,6 +16,8 @@
 
 package com.android.example.github.ui.user
 
+import androidx.appstate.statestore.StateStore
+import com.android.example.github.repository.AuthStateHolder
 import com.google.common.truth.Truth.assertThat
 import com.android.example.github.util.FakeRepoRepository
 import com.android.example.github.util.FakeUserRepository
@@ -42,6 +44,7 @@ class UserViewModelTest {
 
     private val userRepository = FakeUserRepository()
     private val repoRepository = FakeRepoRepository()
+    private val authState = AuthStateHolder(StateStore())
     private lateinit var userViewModel: UserViewModel
 
     @Before
@@ -49,7 +52,8 @@ class UserViewModelTest {
         userViewModel = UserViewModel(
             userRepository,
             repoRepository,
-            fakeAuthRepository(),
+            fakeAuthRepository(authState),
+            authState,
             mainDispatcherRule.testDispatcher
         )
     }

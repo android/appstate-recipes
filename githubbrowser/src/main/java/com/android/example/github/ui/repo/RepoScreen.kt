@@ -58,7 +58,7 @@ fun RepoScreen(
     onBack: () -> Unit,
     onContributorClick: (login: String, avatarUrl: String?) -> Unit,
     modifier: Modifier = Modifier,
-    repoViewModel: RepoViewModel = hiltViewModel(key = "$owner/$name")
+    repoViewModel: RepoViewModel = hiltViewModel()
 ) {
     LaunchedEffect(owner, name) {
         repoViewModel.setId(owner, name)
