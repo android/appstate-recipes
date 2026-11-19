@@ -17,4 +17,5 @@
 
 <resources>
     <string name="app_name">AppState Recipes</string>
+    <string name="focus_widget_description">Track and control active focus sessions on your home screen.</string>
 </resources>

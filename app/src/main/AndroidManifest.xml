@@ -55,6 +55,21 @@
         <activity
             android:name=".sample.SampleActivity"
             android:exported="false" />
+        <activity
+            android:name=".glance.GlanceActivity"
+            android:exported="false" />
+
+        <receiver
+            android:name=".glance.FocusWidgetReceiver"
+            android:exported="true"
+            android:label="FocusFlow">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/focus_widget_info" />
+        </receiver>
     </application>
 
 </manifest>
