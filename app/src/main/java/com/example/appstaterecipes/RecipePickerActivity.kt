@@ -68,6 +68,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.example.appstaterecipes.debounce.DebounceActivity
+import com.example.appstaterecipes.glance.GlanceActivity
 import com.example.appstaterecipes.sample.SampleActivity
 import com.example.appstaterecipes.ui.excludeBottom
 import com.example.appstaterecipes.ui.onlyBottom
@@ -104,6 +105,12 @@ private val recipes = listOf(
         name = "Sample",
         description = "Throttles high-frequency streams into a fixed periodic cadence (e.g. sensor readings).",
         target = RecipeTarget.InternalActivity(SampleActivity::class.java),
+    ),
+    Heading("Transform — UI Surfaces & Nested Transforms"),
+    Recipe(
+        name = "Glance Widget",
+        description = "Derives state for a Jetpack Glance home-screen widget and layers nested transforms across surfaces.",
+        target = RecipeTarget.InternalActivity(GlanceActivity::class.java),
     ),
     Heading("StateStore — Multi-Window Navigation"),
     Recipe(

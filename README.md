@@ -15,6 +15,9 @@ These are the recipes and what they demonstrate.
 - **[Debounce](app/src/main/java/com/example/appstaterecipes/debounce)**: Demonstrates how to debounce rapidly changing state (such as search queries) using `DebounceEffect` and `rememberDebounced`.
 - **[Sample](app/src/main/java/com/example/appstaterecipes/sample)**: Demonstrates how to periodically sample high-frequency state streams (such as accelerometer sensor data) using `SampleEffect` and `rememberSampled`.
 
+#### UI surfaces & nested transforms
+- **[Glance Widget](app/src/main/java/com/example/appstaterecipes/glance)**: Demonstrates how to define a `transform` for a Jetpack Glance home-screen widget (`GlanceAppWidget`) and layer nested `transform` blocks across an app screen and widget with dynamic read tracking.
+
 ### Full-app recipes
 Full-app recipes live under `apps/*` (such as `apps/browser/`). Each is an independent Android application module that can be launched directly via its own Android Studio Run Configuration (e.g. `apps.browser`) or deployed to a device and opened from the main Recipe Picker (`:app`). Shared architecture components (like `StateStoreOwner`, `StateStoreViewerActivity`, and common theming) are provided by the shared `:core` library module.
 
